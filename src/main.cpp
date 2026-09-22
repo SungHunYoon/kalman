@@ -2,14 +2,18 @@
 #include "network/udp_client.hpp"
 #include "protocol/message_assembler.hpp"
 #include "protocol/parser.hpp"
+#include "protocol/process_message.hpp"
 #include "protocol/sensor_state.hpp"
 #include "protocol/stream_control.hpp"
+#include "telemetry/telemetry_builder.hpp"
+#include "telemetry/telemetry_publisher.hpp"
 #include <cstdlib>
 #include <cstdint>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -39,6 +43,13 @@ int main(int argc, char** argv) {
 		SensorState sensor_state({options.accel_sigma, options.gps_sigma,
 			options.gate_threshold});
 		Parser parser;
+		TelemetryBuilder telemetry_builder;
+		std::optional<TelemetryPublisher> telemetry_publisher;
+		if (options.telemetry_enabled) {
+			telemetry_publisher.emplace(options.telemetry_host, options.telemetry_port);
+		} else {
+			telemetry_publisher.emplace();
+		}
 
 		std::cout << "[send] READY\n";
 		client.send_text("READY\n");
@@ -52,13 +63,19 @@ int main(int argc, char** argv) {
 			const std::vector<std::string> messages = assembler.append(chunk);
 			for (const std::string& message : messages) {
 				const SensorUpdate update = parser.parse(message);
-				sensor_state.apply(update);
-				if (sensor_state.has_estimated_position()) {
-					client.send_text(format_position(sensor_state.estimated_position()));
-					std::cout << format_position(sensor_state.estimated_position()) << "\n";
-				}
+				process_message(sensor_state, update, telemetry_builder,
+					[&client](const Vector<double>& position) {
+						client.send_text(format_position(position));
+					},
+					[&telemetry_publisher](const TelemetryPacket& packet) {
+						(void)telemetry_publisher->publish(packet);
+					});
 			}
 		}
+		const FilterTimingSnapshot timing = sensor_state.timing_snapshot();
+		std::cout << "filter timing us: mean=" << timing.average << " p95=" << timing.p95
+			<< " p99=" << timing.p99 << " max=" << timing.maximum << "\n";
+		std::cout << "telemetry dropped: " << telemetry_publisher->dropped_count() << "\n";
 	} catch (const HelpRequested&) {
 		std::cout << usage(argv[0]);
 		return 0;
