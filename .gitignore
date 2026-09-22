@@ -1,4 +1,5 @@
 obj/
 kalman
+kalman_tests
 imu-sensor-stream-macos
 .worktrees/

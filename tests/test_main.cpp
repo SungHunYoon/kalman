@@ -1,0 +1,192 @@
+#include "filter/kalman_filter.hpp"
+#include "protocol/message_assembler.hpp"
+#include "protocol/parser.hpp"
+#include "protocol/sensor_state.hpp"
+#include "protocol/stream_control.hpp"
+
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+	void require(bool condition, const std::string& message) {
+		if (!condition) {
+			throw std::runtime_error(message);
+		}
+	}
+
+	void require_close(double actual, double expected, const std::string& message) {
+		if (std::abs(actual - expected) > 1e-9) {
+			throw std::runtime_error(message);
+		}
+	}
+
+	void test_assembles_split_markers() {
+		MessageAssembler assembler;
+		require(assembler.append("noise MSG_STA").empty(), "partial start marker produced a message");
+		require(assembler.append("RT\nA\nMSG_").empty(), "partial end marker produced a message");
+		const std::vector<std::string> messages = assembler.append("END trailing");
+		require(messages.size() == 1, "split message was not assembled");
+		require(messages[0] == "MSG_START\nA\nMSG_END", "assembled payload differs from input");
+	}
+
+	void test_extracts_multiple_messages_from_one_chunk() {
+		MessageAssembler assembler;
+		const std::vector<std::string> messages = assembler.append(
+			"MSG_START\nA\nMSG_ENDMSG_START\nB\nMSG_END");
+		require(messages.size() == 2, "expected two messages from one chunk");
+		require(messages[0] == "MSG_START\nA\nMSG_END", "first message mismatch");
+		require(messages[1] == "MSG_START\nB\nMSG_END", "second message mismatch");
+	}
+
+	void test_assembles_line_per_datagram_protocol() {
+		MessageAssembler assembler;
+		const std::vector<std::string> chunks = {
+			"MSG_START", "[00:00:00.000]TRUE POSITION", "-6.5", "-3.9", "0.5", "",
+			"[00:00:00.000]SPEED", "36", "", "[00:00:00.000]DIRECTION", "0", "0", "0",
+			"MSG_END"
+		};
+		std::vector<std::string> messages;
+		for (const std::string& chunk : chunks) {
+			const std::vector<std::string> completed = assembler.append(chunk);
+			messages.insert(messages.end(), completed.begin(), completed.end());
+		}
+		require(messages.size() == 1, "datagram sequence did not produce one message");
+		const SensorUpdate update = Parser().parse(messages[0]);
+		require(update.initial_position.has_value(), "datagram fields were concatenated");
+		require(update.initial_speed_kmh.has_value(), "datagram speed was not parsed");
+		require_close((*update.initial_position)[0], -6.5, "datagram X mismatch");
+	}
+
+	void test_parses_position_as_gps_without_confusing_true_position() {
+		Parser parser;
+		const SensorUpdate update = parser.parse(
+			"MSG_START\r\n"
+			"[00:00:01.250] TRUE POSITION\r\n1\r\n2\r\n3\r\n"
+			"[00:00:01.250] POSITION\r\n4\r\n5\r\n6\r\n"
+			"MSG_END\r\n");
+		require(update.initial_position.has_value(), "TRUE POSITION was not parsed");
+		require(update.gps.has_value(), "POSITION was not parsed as GPS");
+		require_close((*update.initial_position)[0], 1.0, "initial X mismatch");
+		require_close((*update.gps)[0], 4.0, "GPS X mismatch");
+		require_close(update.time, 1.25, "timestamp mismatch");
+	}
+
+	void test_rejects_number_with_trailing_data() {
+		Parser parser;
+		bool threw = false;
+		try {
+			parser.parse("MSG_START\n[00:00:01.000] POSITION\n1oops\n2\n3\nMSG_END\n");
+		} catch (const std::runtime_error&) {
+			threw = true;
+		}
+		require(threw, "numeric value with trailing data was accepted");
+	}
+
+	void test_rejects_invalid_timestamp() {
+		Parser parser;
+		bool threw = false;
+		try {
+			parser.parse("MSG_START\n[not-a-time]POSITION\n1\n2\n3\nMSG_END\n");
+		} catch (const std::runtime_error&) {
+			threw = true;
+		}
+		require(threw, "invalid timestamp was accepted");
+	}
+
+	void test_kalman_predicts_constant_acceleration() {
+		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{1.0, 0.0, 0.0});
+		filter.predict(Vector<double>{2.0, 0.0, 0.0}, 0.5);
+		require_close(filter.position()[0], 0.75, "predicted position mismatch");
+		require_close(filter.velocity()[0], 2.0, "predicted velocity mismatch");
+	}
+
+	void test_kalman_gps_update_moves_estimate_toward_measurement() {
+		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{0.0, 0.0, 0.0});
+		filter.predict(Vector<double>{0.0, 0.0, 0.0}, 3.0);
+		const double before = filter.position()[0];
+		filter.update_gps(Vector<double>{1.0, 0.0, 0.0});
+		require(filter.position()[0] > before, "GPS update did not move toward measurement");
+		require(filter.position()[0] < 1.0, "GPS update overshot measurement");
+	}
+
+	void test_sensor_state_initializes_and_predicts_with_si_units() {
+		SensorState state;
+		SensorUpdate initial;
+		initial.time = 0.0;
+		initial.initial_position = Vector<double>{0.0, 0.0, 0.0};
+		initial.initial_speed_kmh = 36.0;
+		initial.direction = Vector<double>{0.0, 0.0, 0.0};
+		initial.acceleration = Vector<double>{0.0, 0.0, 0.0};
+		state.apply(initial);
+		require(state.has_estimated_position(), "state did not initialize");
+
+		SensorUpdate next;
+		next.time = 1.0;
+		next.acceleration = Vector<double>{1.0, 0.0, 0.0};
+		state.apply(next);
+		require_close(state.estimated_position()[0], 10.5, "state prediction did not use m/s");
+	}
+
+	void test_sensor_state_uses_yaw_for_initial_velocity() {
+		SensorState state;
+		SensorUpdate initial;
+		initial.time = 10.0;
+		initial.initial_position = Vector<double>{0.0, 0.0, 0.0};
+		initial.initial_speed_kmh = 36.0;
+		initial.direction = Vector<double>{0.0, 0.0, 1.5707963267948966};
+		state.apply(initial);
+
+		SensorUpdate next;
+		next.time = 11.0;
+		next.acceleration = Vector<double>{0.0, 0.0, 0.0};
+		state.apply(next);
+		require_close(state.estimated_position()[0], 0.0, "yaw left velocity on X axis");
+		require_close(state.estimated_position()[1], 10.0, "yaw did not rotate velocity to Y axis");
+	}
+
+	void test_sensor_state_handles_midnight_rollover() {
+		SensorState state;
+		SensorUpdate initial;
+		initial.time = 86399.99;
+		initial.initial_position = Vector<double>{0.0, 0.0, 0.0};
+		initial.initial_speed_kmh = 36.0;
+		initial.direction = Vector<double>{0.0, 0.0, 0.0};
+		state.apply(initial);
+
+		SensorUpdate next;
+		next.time = 0.0;
+		next.acceleration = Vector<double>{0.0, 0.0, 0.0};
+		state.apply(next);
+		require_close(state.estimated_position()[0], 0.1, "midnight rollover produced the wrong dt");
+	}
+
+	void test_recognizes_sensor_stream_goodbye() {
+		require(is_sensor_stream_goodbye("GOODBYE."), "GOODBYE was not recognized");
+		require(!is_sensor_stream_goodbye("Trajectory Generated!"), "ordinary status was goodbye");
+	}
+}
+
+int main() {
+	try {
+		test_assembles_split_markers();
+		test_extracts_multiple_messages_from_one_chunk();
+		test_assembles_line_per_datagram_protocol();
+		test_parses_position_as_gps_without_confusing_true_position();
+		test_rejects_number_with_trailing_data();
+		test_rejects_invalid_timestamp();
+		test_kalman_predicts_constant_acceleration();
+		test_kalman_gps_update_moves_estimate_toward_measurement();
+		test_sensor_state_initializes_and_predicts_with_si_units();
+		test_sensor_state_uses_yaw_for_initial_velocity();
+		test_sensor_state_handles_midnight_rollover();
+		test_recognizes_sensor_stream_goodbye();
+		std::cout << "12 tests passed\n";
+	} catch (const std::exception& e) {
+		std::cerr << "test failure: " << e.what() << "\n";
+		return 1;
+	}
+	return 0;
+}

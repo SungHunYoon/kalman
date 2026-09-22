@@ -9,6 +9,9 @@ OBJ_DIR		= obj
 
 SRCS		= $(shell find $(SRC_DIR) -name "*.cpp")
 OBJS		= $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
+LIB_SRCS	= $(filter-out $(SRC_DIR)/main.cpp,$(SRCS))
+TEST_SRCS	= $(shell find tests -name "*.cpp" 2>/dev/null)
+TEST_NAME	= kalman_tests
 
 all: $(NAME)
 
@@ -23,8 +26,14 @@ clean:
 	rm -rf $(OBJ_DIR)
 
 fclean: clean
-	rm -f $(NAME)
+	rm -f $(NAME) $(TEST_NAME)
 
 re: fclean all
 
-.PHONY: all clean fclean re
+test: $(TEST_NAME)
+	./$(TEST_NAME)
+
+$(TEST_NAME): $(TEST_SRCS) $(LIB_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_SRCS) $(LIB_SRCS) -o $(TEST_NAME)
+
+.PHONY: all clean fclean re test

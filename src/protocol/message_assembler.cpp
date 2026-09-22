@@ -1,32 +1,66 @@
 #include "protocol/message_assembler.hpp"
 
-MessageAssembler::MessageAssembler() : buffer(), collecting(false) {}
+namespace {
+	const std::string START_MARKER = "MSG_START";
+	const std::string END_MARKER = "MSG_END";
 
-bool MessageAssembler::append(const std::string& chunk, std::string& completed_message) {
-	if (!collecting) {
-		std::size_t start_pos = chunk.find("MSG_START");
-		if (start_pos == std::string::npos) {
-			return false;
+	std::size_t marker_prefix_length(const std::string& text, const std::string& marker) {
+		const std::size_t maximum = std::min(text.size(), marker.size() - 1);
+		for (std::size_t length = maximum; length > 0; --length) {
+			if (text.compare(text.size() - length, length, marker, 0, length) == 0) {
+				return length;
+			}
 		}
-		buffer.clear();
-		buffer = chunk.substr(start_pos);
-		collecting = true;
-	} else {
-		buffer += chunk;
+		return 0;
 	}
-	std::size_t end_pos = buffer.find("MSG_END");
-	if (end_pos == std::string::npos) {
+
+	bool completes_split_marker(const std::string& left,
+								const std::string& right,
+								const std::string& marker) {
+		for (std::size_t length = 1; length < marker.size(); ++length) {
+			if (left.size() >= length && right.size() >= marker.size() - length &&
+				left.compare(left.size() - length, length, marker, 0, length) == 0 &&
+				right.compare(0, marker.size() - length, marker, length,
+					marker.size() - length) == 0) {
+				return true;
+			}
+		}
 		return false;
 	}
-	completed_message = buffer.substr(0, end_pos + std::string("MSG_END").size());
-	buffer.erase(0, end_pos + std::string("MSG_END").size());
-	std::size_t next_start_pos = buffer.find("MSG_START");
-	if (next_start_pos == std::string::npos) {
-		buffer.clear();
-		collecting = false;
-	} else {
-		buffer.erase(0, next_start_pos);
-		collecting = true;
+}
+
+MessageAssembler::MessageAssembler() : buffer() {}
+
+std::vector<std::string> MessageAssembler::append(const std::string& chunk) {
+	std::vector<std::string> messages;
+	if (!buffer.empty() &&
+		!completes_split_marker(buffer, chunk, START_MARKER) &&
+		!completes_split_marker(buffer, chunk, END_MARKER) &&
+		buffer[buffer.size() - 1] != '\n' &&
+		(chunk.empty() || chunk[0] != '\n')) {
+		buffer += '\n';
 	}
-	return true;
+	buffer += chunk;
+
+	while (true) {
+		const std::size_t start_pos = buffer.find(START_MARKER);
+		if (start_pos == std::string::npos) {
+			const std::size_t keep = marker_prefix_length(buffer, START_MARKER);
+			buffer.erase(0, buffer.size() - keep);
+			break;
+		}
+		if (start_pos > 0) {
+			buffer.erase(0, start_pos);
+		}
+
+		const std::size_t end_pos = buffer.find(END_MARKER, START_MARKER.size());
+		if (end_pos == std::string::npos) {
+			break;
+		}
+
+		const std::size_t message_size = end_pos + END_MARKER.size();
+		messages.push_back(buffer.substr(0, message_size));
+		buffer.erase(0, message_size);
+	}
+	return messages;
 }

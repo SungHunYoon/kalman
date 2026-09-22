@@ -2,14 +2,29 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
+#include <cmath>
 #include <optional>
 #include <stdexcept>
 #include <sstream>
 #include <vector>
 
 namespace {
-	bool contains(const std::string& line, const std::string& text) {
-		return line.find(text) != std::string::npos;
+	std::string trim(const std::string& text) {
+		std::size_t first = 0;
+		while (first < text.size() && std::isspace(static_cast<unsigned char>(text[first]))) {
+			++first;
+		}
+		std::size_t last = text.size();
+		while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) {
+			--last;
+		}
+		return text.substr(first, last - first);
+	}
+
+	std::string label_of(const std::string& line) {
+		const std::size_t bracket = line.find(']');
+		return trim(bracket == std::string::npos ? line : line.substr(bracket + 1));
 	}
 
 	std::vector<std::string> split_lines(const std::string& message) {
@@ -26,20 +41,24 @@ namespace {
 	}
 
 	bool parse_double(const std::string& line, double& out) {
-		char* end = NULL;
+		char* end = nullptr;
 		const char* str = line.c_str();
 		out = std::strtod(str, &end);
-		return end != str;
+		if (end == str || !std::isfinite(out)) {
+			return false;
+		}
+		while (*end != '\0' && std::isspace(static_cast<unsigned char>(*end))) {
+			++end;
+		}
+		return *end == '\0';
 	}
 
 	bool is_label_line(const std::string& line) {
-		return contains(line, "TRUE POSITION") ||
-			contains(line, "SPEED") ||
-			contains(line, "ACCELERATION") ||
-			contains(line, "DIRECTION") ||
-			contains(line, "GPS") ||
-			contains(line, "MSG_START") ||
-			contains(line, "MSG_END");
+		const std::string label = label_of(line);
+		return label == "TRUE POSITION" || label == "POSITION" ||
+			label == "SPEED" || label == "ACCELERATION" ||
+			label == "DIRECTION" || label == "GPS" ||
+			label == "MSG_START" || label == "MSG_END";
 	}
 
 	bool read_next_number(const std::vector<std::string>& lines,
@@ -82,14 +101,18 @@ namespace {
 		std::size_t left = line.find('[');
 		std::size_t right = line.find(']');
 		if (left == std::string::npos || right == std::string::npos || right <= left + 1) {
-			return 0.0;
+			throw std::runtime_error("[parse_time_from_label] missing timestamp");
 		}
 		std::string time_str = line.substr(left + 1, right - left - 1);
 		int hour = 0;
 		int minute = 0;
 		double second = 0.0;
-		if (std::sscanf(time_str.c_str(), "%d:%d:%lf", &hour, &minute, &second) != 3) {
-			return 0.0;
+		char trailing = '\0';
+		if (std::sscanf(time_str.c_str(), "%d:%d:%lf%c", &hour, &minute, &second,
+						&trailing) != 3 || hour < 0 || hour >= 24 ||
+			minute < 0 || minute >= 60 || !std::isfinite(second) ||
+			second < 0.0 || second >= 60.0) {
+			throw std::runtime_error("[parse_time_from_label] invalid timestamp: " + time_str);
 		}
 		return static_cast<double>(hour) * 3600.0 +
 				static_cast<double>(minute) * 60.0 +
@@ -124,21 +147,22 @@ SensorUpdate Parser::parse(const std::string& message) const {
 	std::vector<std::string> lines = split_lines(message);
 	for (std::size_t i = 0; i < lines.size(); ++i) {
 		const std::string& line = lines[i];
-		if (contains(line, "TRUE POSITION")) {
+		const std::string label = label_of(line);
+		if (label == "TRUE POSITION") {
 			update.time = parse_time_from_label(line);
 			parse_vector_field(lines, i, "TRUE POSITION", update.initial_position);
-		} else if (contains(line, "SPEED")) {
+		} else if (label == "SPEED") {
 			update.time = parse_time_from_label(line);
 			parse_double_field(lines, i, "SPEED", update.initial_speed_kmh);
-		} else if (contains(line, "ACCELERATION")) {
+		} else if (label == "ACCELERATION") {
 			update.time = parse_time_from_label(line);
 			parse_vector_field(lines, i, "ACCELERATION", update.acceleration);
-		} else if (contains(line, "DIRECTION")) {
+		} else if (label == "DIRECTION") {
 			update.time = parse_time_from_label(line);
 			parse_vector_field(lines, i, "DIRECTION", update.direction);
-		} else if (contains(line, "GPS")) {
+		} else if (label == "POSITION" || label == "GPS") {
 			update.time = parse_time_from_label(line);
-			parse_vector_field(lines, i, "GPS", update.gps);
+			parse_vector_field(lines, i, "POSITION", update.gps);
 		}
 	}
 	return update;

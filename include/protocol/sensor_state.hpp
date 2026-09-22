@@ -1,24 +1,24 @@
 #pragma once
 
+#include "filter/kalman_filter.hpp"
 #include "linear_algebra/vector.hpp"
 #include "protocol/sensor_update.hpp"
 
+#include <optional>
+
 class SensorState {
 	private:
-		double current_time;
-		double previous_time;
-
-		Vector<double> position;
+		double filter_time;
 		double speed_kmh;
 		Vector<double> acceleration;
 		Vector<double> direction;
-		Vector<double> gps;
+		Vector<double> initial_position;
+		Vector<double> estimate;
 
-		bool has_position;
+		bool has_initial_position;
 		bool has_speed;
-		bool has_acceleration;
 		bool has_direction;
-		bool has_gps;
+		std::optional<KalmanFilter> filter;
 
 	public:
 		SensorState();
