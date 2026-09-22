@@ -62,7 +62,33 @@
 - [x] 센서 스트림과의 1분 종단 간 실행
 - [x] 최대 90분 궤적 검증
 
-현재 필터는 위치와 속도로 이루어진 6차원 상태를 예측하고, GPS `POSITION`이 들어올 때 위치 측정을 반영한다.
+현재 필터는 위치와 속도로 이루어진 고정 크기 6차원 상태를 예측하고, GPS `POSITION`이 들어올 때 innovation gating과 제한된 적응형 측정 잡음을 적용한다. predict/update hot path는 필터 생성 이후 heap allocation을 사용하지 않는다.
+
+### 필터 실행 옵션
+
+```text
+--accel-sigma <positive finite double>
+--gps-sigma <positive finite double>
+--gate-threshold <positive finite double>
+--telemetry-host <IPv4 address>
+--telemetry-port <1..65535>
+--no-telemetry
+```
+
+기본값은 제공된 센서 스트림의 무옵션 출력에 맞춘 `accel sigma = 0.01`, `GPS sigma = 1`, gate `11.345`다. PDF의 명시값으로 서버를 `-a 0.001 -g 0.1`로 실행하면 클라이언트에도 `--accel-sigma 0.001 --gps-sigma 0.1`을 전달한다. 서버의 `--noise N`은 기준 sigma를 N배 하므로 클라이언트 sigma도 같은 배수로 지정한다. 예를 들어 `--noise 10`은 `--accel-sigma 0.1 --gps-sigma 10`과 짝을 이룬다.
+
+### 고정 크기 필터 성능
+
+2026-09-22 Apple Silicon macOS에서 x86_64 센서 스트림을 Rosetta로 실행해 seed 42, duration 1분, `--filterspeed`, 뷰어 비활성 조건으로 측정했다.
+
+| 실행 | 센서 스트림 평균 응답 시간 |
+|---:|---:|
+| 1 | 0.0001663508 ms |
+| 2 | 0.0001616607 ms |
+| 3 | 0.0001596986 ms |
+| 중앙값 | 0.0001616607 ms |
+
+보너스 목표인 평균 `0.05 ms` 이하를 충족한다. 내부 필터 처리 시간은 초기 1,000개 샘플을 제외하고 현재값, 평균, 최소/최대, 최근 4,096개 표본의 p95/p99를 고정 크기 저장소로 집계한다.
 
 ## 통신 프로토콜
 

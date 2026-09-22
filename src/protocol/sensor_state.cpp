@@ -1,6 +1,7 @@
 #include "protocol/sensor_state.hpp"
 
 #include <cmath>
+#include <chrono>
 
 namespace {
 	Vector<double> initial_velocity(double speed_kmh, const Vector<double>& direction) {
@@ -40,6 +41,7 @@ SensorState::SensorState(const FilterConfig& filter_config)
 	  estimate(3, 0.0),
 	  config(filter_config),
 	  last_gps_result_(),
+	  timing_stats_(),
 	  has_initial_position(false),
 	  has_speed(false),
 	  has_direction(false),
@@ -81,12 +83,15 @@ void SensorState::apply(const SensorUpdate& update) {
 		return;
 	}
 
+	const auto started = std::chrono::steady_clock::now();
 	last_gps_result_ = GpsUpdateResult{};
 	filter->predict(to_vector3d(acceleration), dt);
 	filter_time = update.time;
 	if (update.gps) {
 		last_gps_result_ = filter->update_gps(to_vector3d(*update.gps));
 	}
+	const auto finished = std::chrono::steady_clock::now();
+	timing_stats_.record(std::chrono::duration<double, std::micro>(finished - started).count());
 	estimate = to_vector(filter->snapshot().position);
 }
 
@@ -112,4 +117,8 @@ std::uint64_t SensorState::accepted_gps_count() const {
 
 std::uint64_t SensorState::rejected_gps_count() const {
 	return filter ? filter->rejected_gps_count() : 0;
+}
+
+FilterTimingSnapshot SensorState::timing_snapshot() const {
+	return timing_stats_.snapshot();
 }

@@ -2,6 +2,7 @@
 
 #include "filter/fixed_kalman_filter.hpp"
 #include "linear_algebra/vector.hpp"
+#include "performance/filter_stats.hpp"
 #include "protocol/sensor_update.hpp"
 
 #include <optional>
@@ -16,6 +17,7 @@ class SensorState {
 		Vector<double> estimate;
 		FilterConfig config;
 		GpsUpdateResult last_gps_result_;
+		FilterStats timing_stats_;
 
 		bool has_initial_position;
 		bool has_speed;
@@ -32,4 +34,5 @@ class SensorState {
 		GpsUpdateResult last_gps_result() const;
 		std::uint64_t accepted_gps_count() const;
 		std::uint64_t rejected_gps_count() const;
+		FilterTimingSnapshot timing_snapshot() const;
 };

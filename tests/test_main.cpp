@@ -14,6 +14,7 @@
 void run_option_tests();
 void run_fixed_kalman_filter_tests();
 void run_noise_adaptation_tests();
+void run_filter_stats_tests();
 
 namespace {
 	void require(bool condition, const std::string& message) {
@@ -275,6 +276,7 @@ int main() {
 		run_option_tests();
 		run_fixed_kalman_filter_tests();
 		run_noise_adaptation_tests();
+		run_filter_stats_tests();
 		test_assembles_split_markers();
 		test_extracts_multiple_messages_from_one_chunk();
 		test_assembles_line_per_datagram_protocol();
@@ -296,7 +298,7 @@ int main() {
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();
 		test_sensor_stream_receive_timeout_is_finite();
-		std::cout << "24 test groups passed\n";
+		std::cout << "25 test groups passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;
