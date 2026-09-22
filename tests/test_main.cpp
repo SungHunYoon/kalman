@@ -11,6 +11,7 @@
 #include <vector>
 
 void run_option_tests();
+void run_fixed_kalman_filter_tests();
 
 namespace {
 	void require(bool condition, const std::string& message) {
@@ -276,6 +277,7 @@ namespace {
 int main() {
 	try {
 		run_option_tests();
+		run_fixed_kalman_filter_tests();
 		test_assembles_split_markers();
 		test_extracts_multiple_messages_from_one_chunk();
 		test_assembles_line_per_datagram_protocol();
@@ -297,7 +299,7 @@ int main() {
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();
 		test_sensor_stream_receive_timeout_is_finite();
-		std::cout << "22 test groups passed\n";
+		std::cout << "23 test groups passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;
