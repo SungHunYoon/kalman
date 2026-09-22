@@ -1,3 +1,4 @@
+#include "cli/options.hpp"
 #include "network/udp_client.hpp"
 #include "protocol/message_assembler.hpp"
 #include "protocol/parser.hpp"
@@ -27,8 +28,10 @@ namespace {
 	}
 }
 
-int main() {
+int main(int argc, char** argv) {
 	try {
+		const AppOptions options = parse_options(argc, argv);
+		(void)options;
 		std::string host = "127.0.0.1";
 		std::uint16_t port = 4242;
 
@@ -56,6 +59,9 @@ int main() {
 				}
 			}
 		}
+	} catch (const HelpRequested&) {
+		std::cout << usage(argv[0]);
+		return 0;
 	} catch (const std::exception& e) {
 		std::cerr << e.what() << "\n";
 		return 1;
