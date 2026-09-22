@@ -1,11 +1,14 @@
 #pragma once
 
 #include "filter/fixed_math.hpp"
+#include "filter/noise_adaptation.hpp"
 
 struct FilterConfig {
 	double accel_sigma;
 	double gps_sigma;
 	double gate_threshold;
+	bool adaptive_noise = true;
+	bool innovation_gating = true;
 };
 
 struct FilterSnapshot {
@@ -29,10 +32,12 @@ public:
 	GpsUpdateResult update_gps(const Vector3d& gps);
 	FilterSnapshot snapshot() const;
 	bool invariants_hold() const;
+	std::uint64_t accepted_gps_count() const;
+	std::uint64_t rejected_gps_count() const;
 
 private:
 	State6d state_{};
 	Matrix6d covariance_{};
 	FilterConfig config_;
-	Vector3d gps_variance_{};
+	NoiseAdaptation adaptation_;
 };

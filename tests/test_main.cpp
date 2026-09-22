@@ -1,4 +1,5 @@
-#include "filter/kalman_filter.hpp"
+#include "filter/fixed_kalman_filter.hpp"
+#include "linear_algebra/matrix.hpp"
 #include "protocol/message_assembler.hpp"
 #include "protocol/parser.hpp"
 #include "protocol/sensor_state.hpp"
@@ -12,6 +13,7 @@
 
 void run_option_tests();
 void run_fixed_kalman_filter_tests();
+void run_noise_adaptation_tests();
 
 namespace {
 	void require(bool condition, const std::string& message) {
@@ -135,32 +137,32 @@ namespace {
 	}
 
 	void test_kalman_predicts_constant_acceleration() {
-		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{1.0, 0.0, 0.0});
-		filter.predict(Vector<double>{2.0, 0.0, 0.0}, 0.5);
-		require_close(filter.position()[0], 0.75, "predicted position mismatch");
-		require_close(filter.velocity()[0], 2.0, "predicted velocity mismatch");
+		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		filter.predict({2.0, 0.0, 0.0}, 0.5);
+		require_close(filter.snapshot().position[0], 0.75, "predicted position mismatch");
+		require_close(filter.snapshot().velocity[0], 2.0, "predicted velocity mismatch");
 	}
 
 	void test_kalman_gps_update_moves_estimate_toward_measurement() {
-		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{0.0, 0.0, 0.0});
-		filter.predict(Vector<double>{0.0, 0.0, 0.0}, 3.0);
-		const double before = filter.position()[0];
-		filter.update_gps(Vector<double>{1.0, 0.0, 0.0});
-		require(filter.position()[0] > before, "GPS update did not move toward measurement");
-		require(filter.position()[0] < 1.0, "GPS update overshot measurement");
+		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		filter.predict({0.0, 0.0, 0.0}, 3.0);
+		const double before = filter.snapshot().position[0];
+		filter.update_gps({1.0, 0.0, 0.0});
+		require(filter.snapshot().position[0] > before, "GPS update did not move toward measurement");
+		require(filter.snapshot().position[0] < 1.0, "GPS update overshot measurement");
 	}
 
 	void test_kalman_does_not_overtrust_stream_default_gps_noise() {
-		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{0.0, 0.0, 0.0});
-		filter.predict(Vector<double>{0.0, 0.0, 0.0}, 3.0);
-		filter.update_gps(Vector<double>{1.0, 0.0, 0.0});
-		require(filter.position()[0] < 0.2, "filter overtrusted a noisy GPS sample");
+		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		filter.predict({0.0, 0.0, 0.0}, 3.0);
+		filter.update_gps({1.0, 0.0, 0.0});
+		require(filter.snapshot().position[0] < 0.2, "filter overtrusted a noisy GPS sample");
 	}
 
 	void test_kalman_models_stream_default_accelerometer_noise() {
-		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{0.0, 0.0, 0.0});
-		filter.predict(Vector<double>{0.0, 0.0, 0.0}, 3.0);
-		require(filter.state_covariance()(3, 3) > 0.0105,
+		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		filter.predict({0.0, 0.0, 0.0}, 3.0);
+		require(filter.snapshot().position_variance[0] > 0.09,
 			"process covariance underestimates stream accelerometer noise");
 	}
 
@@ -174,16 +176,10 @@ namespace {
 	}
 
 	void test_kalman_covariance_remains_symmetric_and_finite() {
-		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{1.0, 2.0, 3.0});
-		filter.predict(Vector<double>{0.1, -0.2, 0.3}, 0.01);
-		filter.update_gps(Vector<double>{0.02, 0.01, 0.04});
-		const Matrix<double>& covariance = filter.state_covariance();
-		for (std::size_t row = 0; row < 6; ++row) {
-			for (std::size_t col = 0; col < 6; ++col) {
-				require(std::isfinite(covariance(row, col)), "covariance contains a non-finite value");
-				require_close(covariance(row, col), covariance(col, row), "covariance is not symmetric");
-			}
-		}
+		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {1.0, 2.0, 3.0}, {1e-2, 1.0, 11.345});
+		filter.predict({0.1, -0.2, 0.3}, 0.01);
+		filter.update_gps({0.02, 0.01, 0.04});
+		require(filter.invariants_hold(), "fixed covariance invariants failed");
 	}
 
 	void test_sensor_state_initializes_and_predicts_with_si_units() {
@@ -278,6 +274,7 @@ int main() {
 	try {
 		run_option_tests();
 		run_fixed_kalman_filter_tests();
+		run_noise_adaptation_tests();
 		test_assembles_split_markers();
 		test_extracts_multiple_messages_from_one_chunk();
 		test_assembles_line_per_datagram_protocol();
@@ -299,7 +296,7 @@ int main() {
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();
 		test_sensor_stream_receive_timeout_is_finite();
-		std::cout << "23 test groups passed\n";
+		std::cout << "24 test groups passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;

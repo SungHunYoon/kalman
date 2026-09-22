@@ -31,13 +31,13 @@ namespace {
 int main(int argc, char** argv) {
 	try {
 		const AppOptions options = parse_options(argc, argv);
-		(void)options;
 		std::string host = "127.0.0.1";
 		std::uint16_t port = 4242;
 
 		UDPClient client(host, port);
 		MessageAssembler assembler;
-		SensorState sensor_state;
+		SensorState sensor_state({options.accel_sigma, options.gps_sigma,
+			options.gate_threshold});
 		Parser parser;
 
 		std::cout << "[send] READY\n";

@@ -95,7 +95,7 @@ bool covariance_valid(const Matrix6d& covariance, double symmetry_tolerance) {
 
 FixedKalmanFilter::FixedKalmanFilter(const Vector3d& position, const Vector3d& velocity,
 	const FilterConfig& config)
-	: config_(config) {
+	: config_(config), adaptation_(config.gps_sigma, config.gate_threshold) {
 	validate_config(config_);
 	if (!vector_finite(position) || !vector_finite(velocity)) {
 		throw std::invalid_argument("initial filter state must be finite");
@@ -109,7 +109,6 @@ FixedKalmanFilter::FixedKalmanFilter(const Vector3d& position, const Vector3d& v
 		state_[axis + DIMENSIONS] = velocity[axis];
 		covariance_[index6(axis, axis)] = 1e-6;
 		covariance_[index6(axis + DIMENSIONS, axis + DIMENSIONS)] = 1e-2;
-		gps_variance_[axis] = gps_variance;
 	}
 }
 
@@ -158,11 +157,17 @@ GpsUpdateResult FixedKalmanFilter::update_gps(const Vector3d& gps) {
 		throw std::invalid_argument("GPS position must be finite");
 	}
 	Matrix3d innovation_covariance{};
+	const Vector3d measurement_variance = config_.adaptive_noise
+		? adaptation_.gps_variance()
+		: Vector3d{config_.gps_sigma * config_.gps_sigma,
+			config_.gps_sigma * config_.gps_sigma, config_.gps_sigma * config_.gps_sigma};
+	Vector3d predicted_position_variance{};
 	for (std::size_t row = 0; row < DIMENSIONS; ++row) {
+		predicted_position_variance[row] = covariance_[index6(row, row)];
 		for (std::size_t column = 0; column < DIMENSIONS; ++column) {
 			innovation_covariance[index3(row, column)] = covariance_[index6(row, column)];
 		}
-		innovation_covariance[index3(row, row)] += gps_variance_[row];
+		innovation_covariance[index3(row, row)] += measurement_variance[row];
 	}
 	Matrix3d inverse_innovation{};
 	if (!invert_symmetric_3x3(innovation_covariance, inverse_innovation)) {
@@ -178,7 +183,6 @@ GpsUpdateResult FixedKalmanFilter::update_gps(const Vector3d& gps) {
 		}
 	}
 	GpsUpdateResult result;
-	result.accepted = true;
 	for (std::size_t axis = 0; axis < DIMENSIONS; ++axis) {
 		result.innovation[axis] = gps[axis] - state_[axis];
 	}
@@ -188,6 +192,12 @@ GpsUpdateResult FixedKalmanFilter::update_gps(const Vector3d& gps) {
 				inverse_innovation[index3(row, column)] * result.innovation[column];
 		}
 	}
+	if (config_.innovation_gating &&
+		result.mahalanobis_squared > adaptation_.current_gate_threshold()) {
+		adaptation_.record_rejection();
+		return result;
+	}
+	result.accepted = true;
 	State6d candidate_state = state_;
 	for (std::size_t row = 0; row < STATE_SIZE; ++row) {
 		for (std::size_t axis = 0; axis < DIMENSIONS; ++axis) {
@@ -219,7 +229,7 @@ GpsUpdateResult FixedKalmanFilter::update_gps(const Vector3d& gps) {
 			}
 			for (std::size_t axis = 0; axis < DIMENSIONS; ++axis) {
 				candidate_covariance[index6(row, column)] += gain[row * DIMENSIONS + axis] *
-					gps_variance_[axis] * gain[column * DIMENSIONS + axis];
+					measurement_variance[axis] * gain[column * DIMENSIONS + axis];
 			}
 		}
 	}
@@ -236,6 +246,7 @@ GpsUpdateResult FixedKalmanFilter::update_gps(const Vector3d& gps) {
 	}
 	state_ = candidate_state;
 	covariance_ = candidate_covariance;
+	adaptation_.record_acceptance(result.innovation, predicted_position_variance);
 	return result;
 }
 
@@ -245,11 +256,21 @@ FilterSnapshot FixedKalmanFilter::snapshot() const {
 		snapshot.position[axis] = state_[axis];
 		snapshot.velocity[axis] = state_[axis + DIMENSIONS];
 		snapshot.position_variance[axis] = covariance_[index6(axis, axis)];
-		snapshot.gps_variance[axis] = gps_variance_[axis];
+		snapshot.gps_variance[axis] = config_.adaptive_noise
+			? adaptation_.gps_variance()[axis]
+			: config_.gps_sigma * config_.gps_sigma;
 	}
 	return snapshot;
 }
 
 bool FixedKalmanFilter::invariants_hold() const {
 	return all_finite(state_, covariance_) && covariance_valid(covariance_);
+}
+
+std::uint64_t FixedKalmanFilter::accepted_gps_count() const {
+	return adaptation_.accepted_count();
+}
+
+std::uint64_t FixedKalmanFilter::rejected_gps_count() const {
+	return adaptation_.rejected_count();
 }

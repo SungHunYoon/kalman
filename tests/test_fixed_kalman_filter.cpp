@@ -1,5 +1,4 @@
 #include "filter/fixed_kalman_filter.hpp"
-#include "filter/kalman_filter.hpp"
 
 #include <atomic>
 #include <cmath>
@@ -50,7 +49,7 @@ void operator delete[](void* pointer, std::size_t) noexcept {
 }
 
 void run_fixed_kalman_filter_tests() {
-	const FilterConfig config{1e-2, 1.0, 1e300};
+	const FilterConfig config{1e-2, 1.0, 1e300, false, false};
 	FixedKalmanFilter filter({0, 0, 0}, {1, 0, 0}, config);
 	filter.predict({2, 0, 0}, 0.5);
 	require_close(filter.snapshot().position[0], 0.75, 1e-12, "fixed predict position mismatch");
@@ -74,24 +73,25 @@ void run_fixed_kalman_filter_tests() {
 		throw std::runtime_error("singular inverse changed output");
 	}
 
-	KalmanFilter legacy(Vector<double>{0, 0, 0}, Vector<double>{1, 2, 3});
 	FixedKalmanFilter fixed({0, 0, 0}, {1, 2, 3}, config);
 	for (int step = 1; step <= 1000; ++step) {
 		const Vector3d acceleration{0.01, -0.02, 0.03};
-		legacy.predict(Vector<double>{0.01, -0.02, 0.03}, 0.01);
 		fixed.predict(acceleration, 0.01);
 		if (step % 300 == 0) {
 			const Vector3d gps{step * 0.011, step * 0.019, step * 0.031};
-			legacy.update_gps(Vector<double>{gps[0], gps[1], gps[2]});
 			fixed.update_gps(gps);
 		}
 	}
 	const FilterSnapshot snapshot = fixed.snapshot();
+	const Vector3d expected_position{10.842523994563845, 18.87255498469673,
+		31.412366036043331};
+	const Vector3d expected_velocity{1.1342554536025147, 1.7872551636160854,
+		3.2912342191654882};
 	for (std::size_t axis = 0; axis < 3; ++axis) {
-		require_close(snapshot.position[axis], legacy.position()[axis], 1e-9,
-			"fixed position differs from legacy filter");
-		require_close(snapshot.velocity[axis], legacy.velocity()[axis], 1e-9,
-			"fixed velocity differs from legacy filter");
+		require_close(snapshot.position[axis], expected_position[axis], 1e-9,
+			"fixed position differs from legacy golden value");
+		require_close(snapshot.velocity[axis], expected_velocity[axis], 1e-9,
+			"fixed velocity differs from legacy golden value");
 	}
 	if (!fixed.invariants_hold()) {
 		throw std::runtime_error("fixed filter invariants failed");
