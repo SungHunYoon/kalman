@@ -1,5 +1,6 @@
 obj/
 kalman
 kalman_tests
+kalman_tests_sanitize
 imu-sensor-stream-macos
 .worktrees/

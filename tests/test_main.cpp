@@ -112,6 +112,28 @@ namespace {
 		require(filter.position()[0] < 1.0, "GPS update overshot measurement");
 	}
 
+	void test_matrix_inverse_produces_identity() {
+		const Matrix<double> matrix{{4.0, 7.0}, {2.0, 6.0}};
+		const Matrix<double> product = matrix.mul_mat(matrix.inverse());
+		require_close(product(0, 0), 1.0, "inverse identity (0,0) mismatch");
+		require_close(product(0, 1), 0.0, "inverse identity (0,1) mismatch");
+		require_close(product(1, 0), 0.0, "inverse identity (1,0) mismatch");
+		require_close(product(1, 1), 1.0, "inverse identity (1,1) mismatch");
+	}
+
+	void test_kalman_covariance_remains_symmetric_and_finite() {
+		KalmanFilter filter(Vector<double>{0.0, 0.0, 0.0}, Vector<double>{1.0, 2.0, 3.0});
+		filter.predict(Vector<double>{0.1, -0.2, 0.3}, 0.01);
+		filter.update_gps(Vector<double>{0.02, 0.01, 0.04});
+		const Matrix<double>& covariance = filter.state_covariance();
+		for (std::size_t row = 0; row < 6; ++row) {
+			for (std::size_t col = 0; col < 6; ++col) {
+				require(std::isfinite(covariance(row, col)), "covariance contains a non-finite value");
+				require_close(covariance(row, col), covariance(col, row), "covariance is not symmetric");
+			}
+		}
+	}
+
 	void test_sensor_state_initializes_and_predicts_with_si_units() {
 		SensorState state;
 		SensorUpdate initial;
@@ -179,11 +201,13 @@ int main() {
 		test_rejects_invalid_timestamp();
 		test_kalman_predicts_constant_acceleration();
 		test_kalman_gps_update_moves_estimate_toward_measurement();
+		test_matrix_inverse_produces_identity();
+		test_kalman_covariance_remains_symmetric_and_finite();
 		test_sensor_state_initializes_and_predicts_with_si_units();
 		test_sensor_state_uses_yaw_for_initial_velocity();
 		test_sensor_state_handles_midnight_rollover();
 		test_recognizes_sensor_stream_goodbye();
-		std::cout << "12 tests passed\n";
+		std::cout << "14 tests passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;
