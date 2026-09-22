@@ -1,6 +1,7 @@
 #pragma once
 
 #include "telemetry/telemetry_packet.hpp"
+#include "performance/filter_stats.hpp"
 #include "visualizer/trajectory_buffer.hpp"
 
 #include <chrono>
@@ -13,6 +14,7 @@ struct ViewerSnapshot {
 	std::uint64_t lost_packets = 0;
 	std::uint64_t malformed_packets = 0;
 	std::uint64_t invalid_packets = 0;
+	FilterTimingSnapshot timing{};
 };
 
 class ViewerModel {
@@ -29,6 +31,7 @@ public:
 private:
 	ViewerSnapshot state_{};
 	TrajectoryBuffer trajectory_{};
+	FilterStats timing_stats_{0};
 	std::chrono::steady_clock::time_point last_packet_{};
 	bool history_paused_ = false;
 };

@@ -33,6 +33,15 @@ void run_visualizer_model_tests() {
 	second.sequence = 13;
 	const auto now = std::chrono::steady_clock::time_point(std::chrono::seconds(10));
 	model.accept(first, now);
+	second.filter_duration_us = 3.0;
+	first.filter_duration_us = 1.0;
+	ViewerModel timing_model;
+	timing_model.accept(first, now);
+	timing_model.accept(second, now);
+	if (timing_model.snapshot(now).timing.average != 2.0 ||
+		timing_model.snapshot(now).timing.maximum != 3.0) {
+		throw std::runtime_error("viewer timing aggregation mismatch");
+	}
 	model.accept(second, now);
 	if (model.snapshot(now).lost_packets != 2 || !model.snapshot(now).connected) {
 		throw std::runtime_error("sequence gap or connection mismatch");

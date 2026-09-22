@@ -16,6 +16,7 @@ void ViewerModel::accept(const TelemetryPacket& packet,
 	}
 	state_.latest = packet;
 	state_.has_packet = true;
+	timing_stats_.record(packet.filter_duration_us);
 	if (!history_paused_) {
 		trajectory_.push(packet);
 	}
@@ -28,6 +29,7 @@ bool ViewerModel::history_paused() const noexcept { return history_paused_; }
 
 ViewerSnapshot ViewerModel::snapshot(std::chrono::steady_clock::time_point now) const {
 	ViewerSnapshot result = state_;
+	result.timing = timing_stats_.snapshot();
 	result.connected = result.has_packet && now >= last_packet_ &&
 		now - last_packet_ <= std::chrono::seconds(2);
 	return result;
