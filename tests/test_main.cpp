@@ -18,6 +18,7 @@ void run_filter_stats_tests();
 void run_telemetry_packet_tests();
 void run_telemetry_publisher_tests();
 void run_telemetry_integration_tests();
+void run_trajectory_buffer_tests();
 
 namespace {
 	void require(bool condition, const std::string& message) {
@@ -283,6 +284,7 @@ int main() {
 		run_telemetry_packet_tests();
 		run_telemetry_publisher_tests();
 		run_telemetry_integration_tests();
+		run_trajectory_buffer_tests();
 		test_assembles_split_markers();
 		test_extracts_multiple_messages_from_one_chunk();
 		test_assembles_line_per_datagram_protocol();
@@ -304,7 +306,7 @@ int main() {
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();
 		test_sensor_stream_receive_timeout_is_finite();
-		std::cout << "28 test groups passed\n";
+		std::cout << "29 test groups passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;
