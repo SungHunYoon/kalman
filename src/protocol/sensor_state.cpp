@@ -36,6 +36,14 @@ SensorState::SensorState()
 	  filter() {}
 
 void SensorState::apply(const SensorUpdate& update) {
+	double dt = 0.0;
+	if (filter) {
+		dt = elapsed_seconds(filter_time, update.time);
+		if (dt <= 0.0) {
+			return;
+		}
+	}
+
 	if (update.initial_position) {
 		initial_position = *update.initial_position;
 		has_initial_position = true;
@@ -62,11 +70,8 @@ void SensorState::apply(const SensorUpdate& update) {
 		return;
 	}
 
-	const double dt = elapsed_seconds(filter_time, update.time);
-	if (dt > 0.0) {
-		filter->predict(acceleration, dt);
-		filter_time = update.time;
-	}
+	filter->predict(acceleration, dt);
+	filter_time = update.time;
 	if (update.gps) {
 		filter->update_gps(*update.gps);
 	}

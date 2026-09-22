@@ -15,3 +15,7 @@ bool is_sensor_stream_goodbye(const std::string& datagram) {
 	}
 	return datagram.substr(first, last - first) == "GOODBYE.";
 }
+
+int sensor_stream_receive_timeout_ms() {
+	return 10000;
+}

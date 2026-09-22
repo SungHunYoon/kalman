@@ -6,8 +6,8 @@
 namespace {
 	const std::size_t DIMENSIONS = 3;
 	const std::size_t STATE_SIZE = 6;
-	const double ACCELEROMETER_VARIANCE = 1e-6;
-	const double GPS_VARIANCE = 1e-2;
+	const double ACCELEROMETER_VARIANCE = 1e-4;
+	const double GPS_VARIANCE = 1.0;
 
 	Matrix<double> identity(std::size_t size) {
 		Matrix<double> result(size, size, 0.0);

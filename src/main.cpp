@@ -5,14 +5,23 @@
 #include "protocol/stream_control.hpp"
 #include <cstdlib>
 #include <cstdint>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace {
 	std::string format_position(const Vector<double>& position) {
+		for (std::size_t axis = 0; axis < 3; ++axis) {
+			if (!std::isfinite(position[axis])) {
+				throw std::runtime_error("[format_position] non-finite estimate");
+			}
+		}
 		std::ostringstream oss;
+		oss << std::setprecision(std::numeric_limits<double>::max_digits10);
 		oss << position[0] << " " << position[1] << " " << position[2] << "\n";
 		return oss.str();
 	}
@@ -32,7 +41,7 @@ int main() {
 		client.send_text("READY\n");
 
 		while (1) {
-			std::string chunk = client.recv_text();
+			std::string chunk = client.recv_text(sensor_stream_receive_timeout_ms());
 			if (is_sensor_stream_goodbye(chunk)) {
 				std::cout << "[recv] GOODBYE.\n";
 				break;

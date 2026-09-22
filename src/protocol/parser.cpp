@@ -76,25 +76,44 @@ namespace {
 				++idx;
 				return true;
 			}
-			++idx;
+			throw std::runtime_error("[read_next_number] invalid numeric value: " + lines[idx]);
 		}
 		return false;
+	}
+
+	void require_field_end(const std::vector<std::string>& lines,
+						   std::size_t idx,
+						   const std::string& field_name) {
+		while (idx < lines.size() && lines[idx].empty()) {
+			++idx;
+		}
+		if (idx < lines.size() && !is_label_line(lines[idx])) {
+			throw std::runtime_error("[require_field_end] extra value in " + field_name);
+		}
 	}
 
 	bool read_vector_after_label(const std::vector<std::string>& lines,
 								std::size_t label_idx,
 								Vector<double>& out) {
 		std::size_t idx = label_idx + 1;
-		return read_next_number(lines, idx, out[0]) &&
+		const bool parsed = read_next_number(lines, idx, out[0]) &&
 			read_next_number(lines, idx, out[1]) &&
 			read_next_number(lines, idx, out[2]);
+		if (parsed) {
+			require_field_end(lines, idx, label_of(lines[label_idx]));
+		}
+		return parsed;
 	}
 
 	bool read_double_after_label(const std::vector<std::string>& lines,
 								std::size_t label_idx,
 								double& out) {
 		std::size_t idx = label_idx + 1;
-		return read_next_number(lines, idx, out);
+		const bool parsed = read_next_number(lines, idx, out);
+		if (parsed) {
+			require_field_end(lines, idx, label_of(lines[label_idx]));
+		}
+		return parsed;
 	}
 
 	double parse_time_from_label(const std::string& line) {

@@ -1,8 +1,11 @@
 #include "protocol/message_assembler.hpp"
 
+#include <stdexcept>
+
 namespace {
 	const std::string START_MARKER = "MSG_START";
 	const std::string END_MARKER = "MSG_END";
+	const std::size_t MAX_MESSAGE_SIZE = 1024 * 1024;
 
 	std::size_t marker_prefix_length(const std::string& text, const std::string& marker) {
 		const std::size_t maximum = std::min(text.size(), marker.size() - 1);
@@ -41,6 +44,10 @@ std::vector<std::string> MessageAssembler::append(const std::string& chunk) {
 		buffer += '\n';
 	}
 	buffer += chunk;
+	if (buffer.size() > MAX_MESSAGE_SIZE) {
+		buffer.clear();
+		throw std::runtime_error("[MessageAssembler] message exceeds 1 MiB");
+	}
 
 	while (true) {
 		const std::size_t start_pos = buffer.find(START_MARKER);
