@@ -87,6 +87,9 @@ void SensorState::apply(const SensorUpdate& update) {
 	last_gps_result_ = GpsUpdateResult{};
 	filter->predict(to_vector3d(acceleration), dt);
 	filter_time = update.time;
+	if (update.direction) {
+		(void)filter->update_direction(to_vector3d(*update.direction));
+	}
 	if (update.gps) {
 		last_gps_result_ = filter->update_gps(to_vector3d(*update.gps));
 	}

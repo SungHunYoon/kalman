@@ -251,36 +251,85 @@ bool FixedKalmanFilter::update_direction(const Vector3d& direction) {
 	}
 	const double pitch = direction[1];
 	const double yaw = direction[2];
-	const Vector3d yaw_normal{-std::sin(yaw), std::cos(yaw), 0.0};
-	const Vector3d pitch_normal{std::sin(pitch) * std::cos(yaw),
+	const Vector3d raw_yaw_normal{-std::sin(yaw), std::cos(yaw), 0.0};
+	const Vector3d raw_pitch_normal{std::sin(pitch) * std::cos(yaw),
 		std::sin(pitch) * std::sin(yaw), std::cos(pitch)};
-	if (!vector_finite(yaw_normal) || !vector_finite(pitch_normal)) {
+	if (!vector_finite(raw_yaw_normal) || !vector_finite(raw_pitch_normal)) {
 		return false;
 	}
-	const double s00 = projected_covariance(yaw_normal, covariance_, yaw_normal) + variance;
-	const double s01 = projected_covariance(yaw_normal, covariance_, pitch_normal);
-	const double s11 = projected_covariance(pitch_normal, covariance_, pitch_normal) + variance;
+	const double s00 = projected_covariance(raw_yaw_normal, covariance_, raw_yaw_normal) + variance;
+	const double s01 = projected_covariance(raw_yaw_normal, covariance_, raw_pitch_normal);
+	const double s11 = projected_covariance(raw_pitch_normal, covariance_, raw_pitch_normal) + variance;
 	const double determinant = s00 * s11 - s01 * s01;
 	if (!std::isfinite(s00) || !std::isfinite(s01) || !std::isfinite(s11) ||
 		s00 <= 0.0 || s11 <= 0.0 || !std::isfinite(determinant) || determinant <= 0.0) {
 		return false;
 	}
-	const double r0 = -project_velocity(yaw_normal, state_);
-	const double r1 = -project_velocity(pitch_normal, state_);
+	const double r0 = -project_velocity(raw_yaw_normal, state_);
+	const double r1 = -project_velocity(raw_pitch_normal, state_);
 	const double distance_squared =
 		(s11 * r0 * r0 - 2.0 * s01 * r0 * r1 + s00 * r1 * r1) / determinant;
 	if (!std::isfinite(distance_squared) || distance_squared < 0.0 ||
 		distance_squared > 9.21) {
 		return false;
 	}
+	// Average unit directions so independent attitude noise does not repeatedly
+	// turn into a longitudinal zero-velocity constraint.
+	auto candidate_samples = direction_samples_;
+	candidate_samples[next_direction_sample_] = Vector3d{
+		std::cos(yaw) * std::cos(pitch),
+		std::sin(yaw) * std::cos(pitch), -std::sin(pitch)};
+	const std::size_t candidate_count = std::min(direction_sample_count_ + 1,
+		DIRECTION_WINDOW);
+	Vector3d sum{};
+	for (std::size_t index = 0; index < candidate_count; ++index) {
+		for (std::size_t axis = 0; axis < DIMENSIONS; ++axis) {
+			sum[axis] += candidate_samples[index][axis];
+		}
+	}
+	const double horizontal = std::hypot(sum[0], sum[1]);
+	const double length = std::hypot(horizontal, sum[2]);
+	if (!vector_finite(sum) || !std::isfinite(length) || length <= 1e-12) {
+		return false;
+	}
+	const double mean_yaw = std::atan2(sum[1], sum[0]);
+	const double mean_pitch = std::atan2(-sum[2], horizontal);
+	const Vector3d yaw_normal{-std::sin(mean_yaw), std::cos(mean_yaw), 0.0};
+	const Vector3d pitch_normal{std::sin(mean_pitch) * std::cos(mean_yaw),
+		std::sin(mean_pitch) * std::sin(mean_yaw), std::cos(mean_pitch)};
 	State6d candidate_state = state_;
 	Matrix6d candidate_covariance = covariance_;
 	if (!scalar_direction_update(yaw_normal, variance, candidate_state, candidate_covariance) ||
 		!scalar_direction_update(pitch_normal, variance, candidate_state, candidate_covariance)) {
 		return false;
 	}
+	// Heading is not a speed measurement. The linearized transverse constraints
+	// otherwise shrink forward speed when noisy headings are applied repeatedly.
+	const double updated_speed = std::hypot(candidate_state[3], candidate_state[4],
+		candidate_state[5]);
+	if (!std::isfinite(updated_speed) || updated_speed <= 0.0) {
+		return false;
+	}
+	const double speed_scale = speed / updated_speed;
+	for (std::size_t axis = DIMENSIONS; axis < STATE_SIZE; ++axis) {
+		candidate_state[axis] *= speed_scale;
+	}
+	for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+		for (std::size_t column = 0; column < STATE_SIZE; ++column) {
+			candidate_covariance[index6(row, column)] *=
+				(row >= DIMENSIONS ? speed_scale : 1.0) *
+				(column >= DIMENSIONS ? speed_scale : 1.0);
+		}
+	}
+	if (!all_finite(candidate_state, candidate_covariance) ||
+		!covariance_valid(candidate_covariance)) {
+		return false;
+	}
 	state_ = candidate_state;
 	covariance_ = candidate_covariance;
+	direction_samples_ = candidate_samples;
+	direction_sample_count_ = candidate_count;
+	next_direction_sample_ = (next_direction_sample_ + 1) % DIRECTION_WINDOW;
 	return true;
 }
 

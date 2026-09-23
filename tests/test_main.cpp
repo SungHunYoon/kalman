@@ -224,6 +224,60 @@ namespace {
 		require_close(state.estimated_position()[1], 10.0, "yaw did not rotate velocity to Y axis");
 	}
 
+	void test_sensor_state_corrects_noisy_initial_yaw() {
+		SensorState state({0.1, 10.0, 11.345});
+		SensorUpdate initial;
+		initial.time = 0.0;
+		initial.initial_position = Vector<double>{0, 0, 0};
+		initial.initial_speed_kmh = 57.6;
+		initial.direction = Vector<double>{0, 0, -0.01};
+		initial.acceleration = Vector<double>{0, 0, 0};
+		state.apply(initial);
+		for (int step = 1; step <= 100; ++step) {
+			SensorUpdate next;
+			next.time = step * 0.01;
+			next.acceleration = Vector<double>{0, 0, 0};
+			next.direction = Vector<double>{0, 0, 0};
+			state.apply(next);
+		}
+		if (std::abs(state.estimated_position()[1]) >= 0.10 ||
+			std::abs(state.filter_snapshot().velocity[1]) >= 0.03) {
+			throw std::runtime_error("fresh direction did not correct initial yaw");
+		}
+	}
+
+	void test_sensor_state_uses_only_fresh_direction_and_keeps_gps_accounting() {
+		SensorState state({0.1, 10.0, 11.345});
+		SensorUpdate initial;
+		initial.time = 0.0;
+		initial.initial_position = Vector<double>{0, 0, 0};
+		initial.initial_speed_kmh = 57.6;
+		initial.direction = Vector<double>{0, 0, -0.01};
+		initial.acceleration = Vector<double>{0, 0, 0};
+		state.apply(initial);
+		SensorUpdate fresh;
+		fresh.time = 0.01;
+		fresh.acceleration = Vector<double>{0, 0, 0};
+		fresh.direction = Vector<double>{0, 0, 0};
+		state.apply(fresh);
+		const double corrected_vy = state.filter_snapshot().velocity[1];
+		SensorUpdate missing;
+		missing.time = 0.02;
+		missing.acceleration = Vector<double>{0, 0, 0};
+		state.apply(missing);
+		if (std::abs(state.filter_snapshot().velocity[1] - corrected_vy) > 1e-12) {
+			throw std::runtime_error("cached direction was applied twice");
+		}
+		SensorUpdate both;
+		both.time = 0.03;
+		both.direction = Vector<double>{0, 0, 0};
+		both.gps = Vector<double>{0.48, 0, 0};
+		state.apply(both);
+		if (state.accepted_gps_count() != 1 || state.rejected_gps_count() != 0) {
+			throw std::runtime_error("direction update changed GPS accounting");
+		}
+	}
+
 	void test_sensor_state_handles_midnight_rollover() {
 		SensorState state;
 		SensorUpdate initial;
@@ -306,11 +360,13 @@ int main() {
 		test_kalman_covariance_remains_symmetric_and_finite();
 		test_sensor_state_initializes_and_predicts_with_si_units();
 		test_sensor_state_uses_yaw_for_initial_velocity();
+		test_sensor_state_corrects_noisy_initial_yaw();
+		test_sensor_state_uses_only_fresh_direction_and_keeps_gps_accounting();
 		test_sensor_state_handles_midnight_rollover();
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();
 		test_sensor_stream_receive_timeout_is_finite();
-		std::cout << "31 test groups passed\n";
+		std::cout << "33 test groups passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;

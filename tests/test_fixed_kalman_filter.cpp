@@ -120,11 +120,18 @@ void run_fixed_kalman_filter_tests() {
 		throw std::runtime_error("direction observation did not remove lateral drift");
 	}
 	const FilterSnapshot before_outlier = aligned.snapshot();
+	FixedKalmanFilter without_outlier = aligned;
 	if (aligned.update_direction({0, 0, 1.5}) ||
 		aligned.snapshot().velocity != before_outlier.velocity ||
 		aligned.snapshot().position != before_outlier.position ||
 		aligned.snapshot().position_variance != before_outlier.position_variance) {
 		throw std::runtime_error("direction outlier changed filter state");
+	}
+	(void)aligned.update_direction({0, 0, 0.01});
+	(void)without_outlier.update_direction({0, 0, 0.01});
+	if (aligned.snapshot().velocity != without_outlier.snapshot().velocity ||
+		aligned.snapshot().position_variance != without_outlier.snapshot().position_variance) {
+		throw std::runtime_error("rejected direction entered averaging window");
 	}
 	FixedKalmanFilter stopped({0, 0, 0}, {0.5, 0, 0}, {0.1, 10.0, 11.345});
 	if (stopped.update_direction({0, 0, 0}) || stopped.snapshot().velocity[0] != 0.5) {
@@ -164,6 +171,24 @@ void run_fixed_kalman_filter_tests() {
 		std::abs(noisy_angles.snapshot().velocity[2]) >= 0.10 ||
 		!noisy_angles.invariants_hold()) {
 		throw std::runtime_error("alternating direction noise biased velocity");
+	}
+	if (noisy_angles.snapshot().velocity[0] < 15.95) {
+		throw std::runtime_error("noisy direction observations reduced forward speed");
+	}
+	if (std::abs(std::hypot(noisy_angles.snapshot().velocity[0],
+		noisy_angles.snapshot().velocity[1], noisy_angles.snapshot().velocity[2]) - 16.0) > 1e-6) {
+		throw std::runtime_error("direction-only observation changed speed magnitude");
+	}
+	FixedKalmanFilter wrapped_angles({0, 0, 0}, {-16, 0, 0}, {0.1, 10, 11.345});
+	for (int step = 0; step < 40; ++step) {
+		wrapped_angles.predict({0, 0, 0}, 0.01);
+		const double yaw = step % 2 == 0 ? 3.131592653589793 : -3.131592653589793;
+		if (!wrapped_angles.update_direction({0, 0, yaw})) {
+			throw std::runtime_error("wrapped heading was rejected");
+		}
+	}
+	if (wrapped_angles.snapshot().velocity[0] > -15.95 || !wrapped_angles.invariants_hold()) {
+		throw std::runtime_error("heading average crossed angle wrap incorrectly");
 	}
 	FixedKalmanFilter turning({0, 0, 0}, {16, 0, 0}, {0.1, 10.0, 11.345});
 	for (int step = 1; step <= 100; ++step) {
