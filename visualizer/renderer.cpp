@@ -125,21 +125,19 @@ void Renderer::draw(const ViewerModel& model) {
 		DrawText(TextFormat("filter us now %.3f avg %.3f p95 %.3f p99 %.3f max %.3f",
 			snapshot.timing.current, snapshot.timing.average, snapshot.timing.p95,
 			snapshot.timing.p99, snapshot.timing.maximum), 24, 148, 18, RAYWHITE);
-		DrawText(TextFormat("GPS variance %.3f %.3f %.3f",
+		DrawText(TextFormat("GPS model variance %.3f %.3f %.3f",
 			snapshot.latest.adaptive_gps_variance[0],
 			snapshot.latest.adaptive_gps_variance[1],
 			snapshot.latest.adaptive_gps_variance[2]), 24, 172, 18, RAYWHITE);
 		if (snapshot.has_last_gps_innovation) {
-			DrawText(TextFormat("last innovation norm %.3f  %s",
-				vector_norm(snapshot.last_gps_innovation),
-				snapshot.last_gps_accepted ? "accepted" : "rejected"),
+			DrawText(TextFormat("last innovation norm %.3f",
+				vector_norm(snapshot.last_gps_innovation)),
 				24, 196, 18, RAYWHITE);
 		} else {
 			DrawText("innovation: waiting for GPS", 24, 196, 18, RAYWHITE);
 		}
-		DrawText(TextFormat("GPS accepted %llu rejected %llu  [%s]",
+		DrawText(TextFormat("GPS applied %llu  [%s]",
 			static_cast<unsigned long long>(snapshot.latest.accepted_gps_count),
-			static_cast<unsigned long long>(snapshot.latest.rejected_gps_count),
 			paused_ ? "PAUSED" : "LIVE"), 24, 220, 18, RAYWHITE);
 	}
 	DrawFPS(GetScreenWidth() - 100, 20);

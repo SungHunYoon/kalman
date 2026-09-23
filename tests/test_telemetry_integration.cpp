@@ -41,4 +41,44 @@ void run_telemetry_integration_tests() {
 	if (events != std::vector<std::string>{"response", "telemetry"}) {
 		throw std::runtime_error("response was not sent before telemetry");
 	}
+
+	std::vector<TelemetryPacket> packets;
+	SensorUpdate no_gps;
+	no_gps.time = 1.0;
+	no_gps.acceleration = Vector<double>{0, 0, 0};
+	process_message(state, no_gps, builder,
+		[](const Vector<double>&) {},
+		[&packets](const TelemetryPacket& packet) { packets.push_back(packet); });
+	SensorUpdate measured;
+	measured.time = 2.0;
+	measured.gps = Vector<double>{4, 0, 0};
+	process_message(state, measured, builder,
+		[](const Vector<double>&) {},
+		[&packets](const TelemetryPacket& packet) { packets.push_back(packet); });
+	if (packets.size() != 2 ||
+		(packets[0].flags & (TELEMETRY_GPS_PRESENT | TELEMETRY_GPS_ACCEPTED)) != 0 ||
+		packets[0].innovation != Vector3d{0, 0, 0} ||
+		(packets[1].flags & (TELEMETRY_GPS_PRESENT | TELEMETRY_GPS_ACCEPTED)) !=
+			(TELEMETRY_GPS_PRESENT | TELEMETRY_GPS_ACCEPTED) ||
+		packets[1].innovation != Vector3d{4, 0, 0} ||
+		packets[1].accepted_gps_count != 1 || packets[1].rejected_gps_count != 0 ||
+		packets[1].adaptive_gps_variance != Vector3d{1, 1, 1}) {
+		throw std::runtime_error("original filter telemetry mismatch");
+	}
+	const TelemetryCodec::Bytes wire = TelemetryCodec::encode(packets[1]);
+	TelemetryPacket decoded;
+	if (!TelemetryCodec::decode(wire.data(), wire.size(), decoded) ||
+		decoded.flags != packets[1].flags ||
+		decoded.innovation != packets[1].innovation ||
+		decoded.adaptive_gps_variance != packets[1].adaptive_gps_variance) {
+		throw std::runtime_error("original filter telemetry did not survive codec");
+	}
+
+	GpsUpdateResult legacy_rejected;
+	const TelemetryPacket applied = builder.build(measured, state.filter_snapshot(),
+		legacy_rejected, state.timing_snapshot(), 1, 0);
+	if ((applied.flags & TELEMETRY_GPS_ACCEPTED) == 0 ||
+		(applied.flags & TELEMETRY_GPS_REJECTED) != 0) {
+		throw std::runtime_error("original filter telemetry exposed a GPS rejection");
+	}
 }

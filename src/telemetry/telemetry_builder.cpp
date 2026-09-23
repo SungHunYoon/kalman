@@ -19,7 +19,7 @@ TelemetryPacket TelemetryBuilder::build(const SensorUpdate& update,
 	packet.flags = TELEMETRY_INITIALIZED;
 	if (update.gps) {
 		packet.flags |= TELEMETRY_GPS_PRESENT;
-		packet.flags |= gps.accepted ? TELEMETRY_GPS_ACCEPTED : TELEMETRY_GPS_REJECTED;
+		packet.flags |= TELEMETRY_GPS_ACCEPTED;
 	}
 	packet.sequence = sequence_++;
 	packet.sensor_time_seconds = update.time;
