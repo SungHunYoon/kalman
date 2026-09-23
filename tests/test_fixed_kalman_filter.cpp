@@ -107,4 +107,105 @@ void run_fixed_kalman_filter_tests() {
 	if (allocation_count.load(std::memory_order_relaxed) != allocations_before) {
 		throw std::runtime_error("fixed predict allocated memory");
 	}
+
+	FixedKalmanFilter aligned({0, 0, 0}, {16.0, -0.16, 0.0}, {0.1, 10.0, 11.345});
+	for (int step = 0; step < 100; ++step) {
+		aligned.predict({0, 0, 0}, 0.01);
+		if (!aligned.update_direction({0, 0, 0})) {
+			throw std::runtime_error("valid direction was rejected");
+		}
+	}
+	if (std::abs(aligned.snapshot().velocity[1]) >= 0.03 ||
+		std::abs(aligned.snapshot().position[1]) >= 0.10 || !aligned.invariants_hold()) {
+		throw std::runtime_error("direction observation did not remove lateral drift");
+	}
+	const FilterSnapshot before_outlier = aligned.snapshot();
+	if (aligned.update_direction({0, 0, 1.5}) ||
+		aligned.snapshot().velocity != before_outlier.velocity ||
+		aligned.snapshot().position != before_outlier.position ||
+		aligned.snapshot().position_variance != before_outlier.position_variance) {
+		throw std::runtime_error("direction outlier changed filter state");
+	}
+	FixedKalmanFilter stopped({0, 0, 0}, {0.5, 0, 0}, {0.1, 10.0, 11.345});
+	if (stopped.update_direction({0, 0, 0}) || stopped.snapshot().velocity[0] != 0.5) {
+		throw std::runtime_error("low-speed direction observation was applied");
+	}
+	const FilterSnapshot before_invalid = aligned.snapshot();
+	bool invalid_threw = false;
+	try {
+		(void)aligned.update_direction({0, 0, std::numeric_limits<double>::infinity()});
+	} catch (const std::invalid_argument&) {
+		invalid_threw = true;
+	}
+	if (!invalid_threw || aligned.snapshot().position != before_invalid.position ||
+		aligned.snapshot().velocity != before_invalid.velocity ||
+		aligned.snapshot().position_variance != before_invalid.position_variance) {
+		throw std::runtime_error("invalid direction mutated filter");
+	}
+	invalid_threw = false;
+	try {
+		FixedKalmanFilter bad({0, 0, 0}, {16, 0, 0},
+			{0.1, 10.0, 11.345, true, true, 0.0});
+		(void)bad;
+	} catch (const std::invalid_argument&) {
+		invalid_threw = true;
+	}
+	if (!invalid_threw) {
+		throw std::runtime_error("zero direction sigma accepted");
+	}
+
+	FixedKalmanFilter noisy_angles({0, 0, 0}, {16, 0, 0}, {0.1, 10.0, 11.345});
+	for (int step = 0; step < 200; ++step) {
+		noisy_angles.predict({0, 0, 0}, 0.01);
+		const double angle = step % 2 == 0 ? 0.01 : -0.01;
+		(void)noisy_angles.update_direction({0, angle, angle});
+	}
+	if (std::abs(noisy_angles.snapshot().velocity[1]) >= 0.10 ||
+		std::abs(noisy_angles.snapshot().velocity[2]) >= 0.10 ||
+		!noisy_angles.invariants_hold()) {
+		throw std::runtime_error("alternating direction noise biased velocity");
+	}
+	FixedKalmanFilter turning({0, 0, 0}, {16, 0, 0}, {0.1, 10.0, 11.345});
+	for (int step = 1; step <= 100; ++step) {
+		turning.predict({0, 0, 0}, 0.01);
+		(void)turning.update_direction({0, 0, step * 0.001});
+	}
+	if (turning.snapshot().velocity[1] <= 0.20 || !turning.invariants_hold()) {
+		throw std::runtime_error("direction update did not follow gradual turn");
+	}
+	const auto accepted_before = aligned.accepted_gps_count();
+	const auto rejected_before = aligned.rejected_gps_count();
+	(void)aligned.update_direction({0, 0, 0});
+	if (aligned.accepted_gps_count() != accepted_before ||
+		aligned.rejected_gps_count() != rejected_before) {
+		throw std::runtime_error("direction changed GPS counters");
+	}
+	FixedKalmanFilter control({0, 0, 0}, {16, 0, 0}, {0.1, 10.0, 11.345});
+	FixedKalmanFilter rejected({0, 0, 0}, {16, 0, 0}, {0.1, 10.0, 11.345});
+	(void)rejected.update_direction({0, 0, 1.5});
+	(void)control.update_gps({2, 0, 0});
+	(void)rejected.update_gps({2, 0, 0});
+	if (control.snapshot().position_variance != rejected.snapshot().position_variance ||
+		control.snapshot().velocity != rejected.snapshot().velocity) {
+		throw std::runtime_error("rejected direction changed covariance");
+	}
+	FixedKalmanFilter combined({0, 0, 0}, {16, -0.16, 0}, {0.1, 10, 11.345});
+	(void)combined.update_direction({0, 0, 0});
+	(void)combined.update_gps({0.16, 0, 0});
+	if (combined.accepted_gps_count() != 1 || !combined.invariants_hold()) {
+		throw std::runtime_error("direction then GPS update invalid");
+	}
+	FixedKalmanFilter direction_allocations({0, 0, 0}, {16, 0, 0},
+		{0.1, 10, 11.345});
+	const std::size_t allocations_before_direction =
+		allocation_count.load(std::memory_order_relaxed);
+	count_allocations.store(true, std::memory_order_relaxed);
+	for (int step = 0; step < 100000; ++step) {
+		direction_allocations.predict({0, 0, 0}, 0.01);
+		(void)direction_allocations.update_direction({0, 0, 0});
+	}
+	count_allocations.store(false, std::memory_order_relaxed);
+	if (allocation_count.load(std::memory_order_relaxed) != allocations_before_direction) {
+		throw std::runtime_error("direction update allocated memory");
+	}
 }

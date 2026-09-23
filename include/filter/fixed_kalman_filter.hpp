@@ -9,6 +9,7 @@ struct FilterConfig {
 	double gate_threshold;
 	bool adaptive_noise = true;
 	bool innovation_gating = true;
+	double direction_sigma = 0.01;
 };
 
 struct FilterSnapshot {
@@ -30,6 +31,7 @@ public:
 		const FilterConfig& config);
 	void predict(const Vector3d& acceleration, double dt);
 	GpsUpdateResult update_gps(const Vector3d& gps);
+	bool update_direction(const Vector3d& direction);
 	FilterSnapshot snapshot() const;
 	bool invariants_hold() const;
 	std::uint64_t accepted_gps_count() const;

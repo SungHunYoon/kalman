@@ -26,9 +26,93 @@ namespace {
 	void validate_config(const FilterConfig& config) {
 		if (!std::isfinite(config.accel_sigma) || config.accel_sigma <= 0.0 ||
 			!std::isfinite(config.gps_sigma) || config.gps_sigma <= 0.0 ||
-			!std::isfinite(config.gate_threshold) || config.gate_threshold <= 0.0) {
+			!std::isfinite(config.gate_threshold) || config.gate_threshold <= 0.0 ||
+			!std::isfinite(config.direction_sigma) || config.direction_sigma <= 0.0) {
 			throw std::invalid_argument("filter configuration must be positive and finite");
 		}
+	}
+
+	double project_velocity(const Vector3d& normal, const State6d& state) {
+		double result = 0.0;
+		for (std::size_t axis = 0; axis < DIMENSIONS; ++axis) {
+			result += normal[axis] * state[axis + DIMENSIONS];
+		}
+		return result;
+	}
+
+	double projected_covariance(const Vector3d& left, const Matrix6d& covariance,
+		const Vector3d& right) {
+		double result = 0.0;
+		for (std::size_t row = 0; row < DIMENSIONS; ++row) {
+			for (std::size_t column = 0; column < DIMENSIONS; ++column) {
+				result += left[row] * covariance[index6(row + DIMENSIONS,
+					column + DIMENSIONS)] * right[column];
+			}
+		}
+		return result;
+	}
+
+	bool scalar_direction_update(const Vector3d& normal, double variance,
+		State6d& state, Matrix6d& covariance) {
+		const double innovation = -project_velocity(normal, state);
+		const double innovation_variance =
+			projected_covariance(normal, covariance, normal) + variance;
+		if (!std::isfinite(innovation) || !std::isfinite(innovation_variance) ||
+			innovation_variance <= 0.0) {
+			return false;
+		}
+		std::array<double, STATE_SIZE> gain{};
+		for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+			for (std::size_t axis = 0; axis < DIMENSIONS; ++axis) {
+				gain[row] += covariance[index6(row, axis + DIMENSIONS)] * normal[axis];
+			}
+			gain[row] /= innovation_variance;
+		}
+		State6d candidate_state = state;
+		for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+			candidate_state[row] += gain[row] * innovation;
+		}
+		Matrix6d correction{};
+		for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+			for (std::size_t column = 0; column < STATE_SIZE; ++column) {
+				correction[index6(row, column)] = (row == column ? 1.0 : 0.0) -
+					(column >= DIMENSIONS ? gain[row] * normal[column - DIMENSIONS] : 0.0);
+			}
+		}
+		Matrix6d left_product{};
+		for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+			for (std::size_t column = 0; column < STATE_SIZE; ++column) {
+				for (std::size_t inner = 0; inner < STATE_SIZE; ++inner) {
+					left_product[index6(row, column)] += correction[index6(row, inner)] *
+						covariance[index6(inner, column)];
+				}
+			}
+		}
+		Matrix6d candidate_covariance{};
+		for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+			for (std::size_t column = 0; column < STATE_SIZE; ++column) {
+				for (std::size_t inner = 0; inner < STATE_SIZE; ++inner) {
+					candidate_covariance[index6(row, column)] += left_product[index6(row, inner)] *
+						correction[index6(column, inner)];
+				}
+				candidate_covariance[index6(row, column)] += gain[row] * variance * gain[column];
+			}
+		}
+		for (std::size_t row = 0; row < STATE_SIZE; ++row) {
+			for (std::size_t column = row + 1; column < STATE_SIZE; ++column) {
+				const double symmetric = 0.5 * (candidate_covariance[index6(row, column)] +
+					candidate_covariance[index6(column, row)]);
+				candidate_covariance[index6(row, column)] = symmetric;
+				candidate_covariance[index6(column, row)] = symmetric;
+			}
+		}
+		if (!all_finite(candidate_state, candidate_covariance) ||
+			!covariance_valid(candidate_covariance)) {
+			return false;
+		}
+		state = candidate_state;
+		covariance = candidate_covariance;
+		return true;
 	}
 }
 
@@ -150,6 +234,54 @@ void FixedKalmanFilter::predict(const Vector3d& acceleration, double dt) {
 	}
 	state_ = candidate_state;
 	covariance_ = candidate_covariance;
+}
+
+bool FixedKalmanFilter::update_direction(const Vector3d& direction) {
+	if (!vector_finite(direction)) {
+		throw std::invalid_argument("direction must be finite");
+	}
+	const double speed = std::hypot(state_[3], state_[4], state_[5]);
+	if (!std::isfinite(speed) || speed < 1.0) {
+		return false;
+	}
+	const double scaled_sigma = speed * config_.direction_sigma;
+	const double variance = scaled_sigma * scaled_sigma;
+	if (!std::isfinite(variance) || variance <= 0.0) {
+		return false;
+	}
+	const double pitch = direction[1];
+	const double yaw = direction[2];
+	const Vector3d yaw_normal{-std::sin(yaw), std::cos(yaw), 0.0};
+	const Vector3d pitch_normal{std::sin(pitch) * std::cos(yaw),
+		std::sin(pitch) * std::sin(yaw), std::cos(pitch)};
+	if (!vector_finite(yaw_normal) || !vector_finite(pitch_normal)) {
+		return false;
+	}
+	const double s00 = projected_covariance(yaw_normal, covariance_, yaw_normal) + variance;
+	const double s01 = projected_covariance(yaw_normal, covariance_, pitch_normal);
+	const double s11 = projected_covariance(pitch_normal, covariance_, pitch_normal) + variance;
+	const double determinant = s00 * s11 - s01 * s01;
+	if (!std::isfinite(s00) || !std::isfinite(s01) || !std::isfinite(s11) ||
+		s00 <= 0.0 || s11 <= 0.0 || !std::isfinite(determinant) || determinant <= 0.0) {
+		return false;
+	}
+	const double r0 = -project_velocity(yaw_normal, state_);
+	const double r1 = -project_velocity(pitch_normal, state_);
+	const double distance_squared =
+		(s11 * r0 * r0 - 2.0 * s01 * r0 * r1 + s00 * r1 * r1) / determinant;
+	if (!std::isfinite(distance_squared) || distance_squared < 0.0 ||
+		distance_squared > 9.21) {
+		return false;
+	}
+	State6d candidate_state = state_;
+	Matrix6d candidate_covariance = covariance_;
+	if (!scalar_direction_update(yaw_normal, variance, candidate_state, candidate_covariance) ||
+		!scalar_direction_update(pitch_normal, variance, candidate_state, candidate_covariance)) {
+		return false;
+	}
+	state_ = candidate_state;
+	covariance_ = candidate_covariance;
+	return true;
 }
 
 GpsUpdateResult FixedKalmanFilter::update_gps(const Vector3d& gps) {
