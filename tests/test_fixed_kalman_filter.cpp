@@ -127,9 +127,12 @@ void run_fixed_kalman_filter_tests() {
 		aligned.snapshot().position_variance != before_outlier.position_variance) {
 		throw std::runtime_error("direction outlier changed filter state");
 	}
-	(void)aligned.update_direction({0, 0, 0.01});
-	(void)without_outlier.update_direction({0, 0, 0.01});
+	(void)aligned.update_direction({0, 0.01, 0.01});
+	(void)without_outlier.update_direction({0, 0.01, 0.01});
+	(void)aligned.update_gps({1, 2, -1});
+	(void)without_outlier.update_gps({1, 2, -1});
 	if (aligned.snapshot().velocity != without_outlier.snapshot().velocity ||
+		aligned.snapshot().position != without_outlier.snapshot().position ||
 		aligned.snapshot().position_variance != without_outlier.snapshot().position_variance) {
 		throw std::runtime_error("rejected direction entered averaging window");
 	}
