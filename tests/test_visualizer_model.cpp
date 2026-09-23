@@ -55,6 +55,10 @@ void run_visualizer_model_tests() {
 	if (model.snapshot(now).lost_packets != 2 || model.snapshot(now).latest.sequence != 13) {
 		throw std::runtime_error("reordered packet changed latest state");
 	}
+	model.accept(reordered, now + std::chrono::seconds(3));
+	if (model.snapshot(now + std::chrono::seconds(3)).connected) {
+		throw std::runtime_error("reordered packet extended connection status");
+	}
 
 	ViewerModel wrapped;
 	TelemetryPacket near_wrap;
@@ -75,6 +79,20 @@ void run_visualizer_model_tests() {
 	if (!paused_model.history_paused() || paused_model.snapshot(now).latest.sequence != 20 ||
 		paused_model.trajectory().estimate_count() != 0) {
 		throw std::runtime_error("paused model stopped state updates or changed history");
+	}
+	ViewerModel gps_history;
+	TelemetryPacket gps_packet;
+	gps_packet.sequence = 1;
+	gps_packet.flags = TELEMETRY_GPS_PRESENT | TELEMETRY_GPS_REJECTED;
+	gps_packet.innovation = {3.0, 4.0, 0.0};
+	gps_history.accept(gps_packet, now);
+	TelemetryPacket no_gps_packet;
+	no_gps_packet.sequence = 2;
+	gps_history.accept(no_gps_packet, now);
+	if (!gps_history.snapshot(now).has_last_gps_innovation ||
+		gps_history.snapshot(now).last_gps_innovation != Vector3d{3.0, 4.0, 0.0} ||
+		gps_history.snapshot(now).last_gps_accepted) {
+		throw std::runtime_error("viewer forgot the last GPS innovation");
 	}
 
 	TelemetryReceiver receiver(0);

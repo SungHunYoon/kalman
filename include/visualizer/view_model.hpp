@@ -11,6 +11,9 @@ struct ViewerSnapshot {
 	TelemetryPacket latest{};
 	bool has_packet = false;
 	bool connected = false;
+	bool has_last_gps_innovation = false;
+	bool last_gps_accepted = false;
+	Vector3d last_gps_innovation{};
 	std::uint64_t lost_packets = 0;
 	std::uint64_t malformed_packets = 0;
 	std::uint64_t invalid_packets = 0;

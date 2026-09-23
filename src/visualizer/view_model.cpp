@@ -5,7 +5,6 @@
 
 void ViewerModel::accept(const TelemetryPacket& packet,
 	std::chrono::steady_clock::time_point now) {
-	last_packet_ = now;
 	if (state_.has_packet) {
 		const std::uint64_t delta = packet.sequence - state_.latest.sequence;
 		const bool newer = delta != 0 && delta <= std::numeric_limits<std::uint64_t>::max() / 2;
@@ -14,8 +13,14 @@ void ViewerModel::accept(const TelemetryPacket& packet,
 		}
 		state_.lost_packets += delta - 1;
 	}
+	last_packet_ = now;
 	state_.latest = packet;
 	state_.has_packet = true;
+	if (packet.flags & TELEMETRY_GPS_PRESENT) {
+		state_.has_last_gps_innovation = true;
+		state_.last_gps_accepted = (packet.flags & TELEMETRY_GPS_ACCEPTED) != 0;
+		state_.last_gps_innovation = packet.innovation;
+	}
 	timing_stats_.record(packet.filter_duration_us);
 	if (!history_paused_) {
 		trajectory_.push(packet);

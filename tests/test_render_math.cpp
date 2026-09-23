@@ -18,4 +18,7 @@ void run_render_math_tests() {
 		smoothed_target({1, 2, 3}, {10, 20, 30}, 2.0) != Vector3d{10, 20, 30}) {
 		throw std::runtime_error("camera smoothing mismatch");
 	}
+	if (vector_norm({3.0, 4.0, 0.0}) != 5.0 || vector_norm({0.0, 0.0, 0.0}) != 0.0) {
+		throw std::runtime_error("innovation norm mismatch");
+	}
 }

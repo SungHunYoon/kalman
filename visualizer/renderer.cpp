@@ -107,7 +107,7 @@ void Renderer::draw(const ViewerModel& model) {
 	}
 	EndMode3D();
 
-	DrawRectangle(12, 12, 520, 180, Fade(BLACK, 0.72f));
+	DrawRectangle(12, 12, 720, 264, Fade(BLACK, 0.72f));
 	DrawText(snapshot.connected ? "CONNECTED" : "DISCONNECTED", 24, 22, 20,
 		snapshot.connected ? GREEN : RED);
 	if (snapshot.has_packet) {
@@ -120,13 +120,27 @@ void Renderer::draw(const ViewerModel& model) {
 			snapshot.latest.estimate_position[1], snapshot.latest.estimate_position[2]), 24, 76, 18, RAYWHITE);
 		DrawText(TextFormat("vel %.3f %.3f %.3f", snapshot.latest.estimate_velocity[0],
 			snapshot.latest.estimate_velocity[1], snapshot.latest.estimate_velocity[2]), 24, 100, 18, RAYWHITE);
+		DrawText(TextFormat("acc %.3f %.3f %.3f", snapshot.latest.acceleration[0],
+			snapshot.latest.acceleration[1], snapshot.latest.acceleration[2]), 24, 124, 18, RAYWHITE);
 		DrawText(TextFormat("filter us now %.3f avg %.3f p95 %.3f p99 %.3f max %.3f",
 			snapshot.timing.current, snapshot.timing.average, snapshot.timing.p95,
-			snapshot.timing.p99, snapshot.timing.maximum), 24, 124, 18, RAYWHITE);
+			snapshot.timing.p99, snapshot.timing.maximum), 24, 148, 18, RAYWHITE);
+		DrawText(TextFormat("GPS variance %.3f %.3f %.3f",
+			snapshot.latest.adaptive_gps_variance[0],
+			snapshot.latest.adaptive_gps_variance[1],
+			snapshot.latest.adaptive_gps_variance[2]), 24, 172, 18, RAYWHITE);
+		if (snapshot.has_last_gps_innovation) {
+			DrawText(TextFormat("last innovation norm %.3f  %s",
+				vector_norm(snapshot.last_gps_innovation),
+				snapshot.last_gps_accepted ? "accepted" : "rejected"),
+				24, 196, 18, RAYWHITE);
+		} else {
+			DrawText("innovation: waiting for GPS", 24, 196, 18, RAYWHITE);
+		}
 		DrawText(TextFormat("GPS accepted %llu rejected %llu  [%s]",
 			static_cast<unsigned long long>(snapshot.latest.accepted_gps_count),
 			static_cast<unsigned long long>(snapshot.latest.rejected_gps_count),
-			paused_ ? "PAUSED" : "LIVE"), 24, 148, 18, RAYWHITE);
+			paused_ ? "PAUSED" : "LIVE"), 24, 220, 18, RAYWHITE);
 	}
 	DrawFPS(GetScreenWidth() - 100, 20);
 	EndDrawing();
