@@ -1,4 +1,4 @@
-#include "filter/fixed_kalman_filter.hpp"
+#include "filter/kalman_filter.hpp"
 #include "linear_algebra/matrix.hpp"
 #include "protocol/message_assembler.hpp"
 #include "protocol/parser.hpp"
@@ -13,7 +13,6 @@
 
 void run_option_tests();
 void run_fixed_kalman_filter_tests();
-void run_noise_adaptation_tests();
 void run_filter_stats_tests();
 void run_telemetry_packet_tests();
 void run_telemetry_publisher_tests();
@@ -144,32 +143,32 @@ namespace {
 	}
 
 	void test_kalman_predicts_constant_acceleration() {
-		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		KalmanFilter filter({0.0, 0.0, 0.0}, {1.0, 0.0, 0.0});
 		filter.predict({2.0, 0.0, 0.0}, 0.5);
-		require_close(filter.snapshot().position[0], 0.75, "predicted position mismatch");
-		require_close(filter.snapshot().velocity[0], 2.0, "predicted velocity mismatch");
+		require_close(filter.position()[0], 0.75, "predicted position mismatch");
+		require_close(filter.velocity()[0], 2.0, "predicted velocity mismatch");
 	}
 
 	void test_kalman_gps_update_moves_estimate_toward_measurement() {
-		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		KalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
 		filter.predict({0.0, 0.0, 0.0}, 3.0);
-		const double before = filter.snapshot().position[0];
+		const double before = filter.position()[0];
 		filter.update_gps({1.0, 0.0, 0.0});
-		require(filter.snapshot().position[0] > before, "GPS update did not move toward measurement");
-		require(filter.snapshot().position[0] < 1.0, "GPS update overshot measurement");
+		require(filter.position()[0] > before, "GPS update did not move toward measurement");
+		require(filter.position()[0] < 1.0, "GPS update overshot measurement");
 	}
 
 	void test_kalman_does_not_overtrust_stream_default_gps_noise() {
-		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		KalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
 		filter.predict({0.0, 0.0, 0.0}, 3.0);
 		filter.update_gps({1.0, 0.0, 0.0});
-		require(filter.snapshot().position[0] < 0.2, "filter overtrusted a noisy GPS sample");
+		require(filter.position()[0] < 0.2, "filter overtrusted a noisy GPS sample");
 	}
 
 	void test_kalman_models_stream_default_accelerometer_noise() {
-		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {1e-2, 1.0, 11.345});
+		KalmanFilter filter({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
 		filter.predict({0.0, 0.0, 0.0}, 3.0);
-		require(filter.snapshot().position_variance[0] > 0.09,
+		require(filter.state_covariance()(0, 0) > 0.09,
 			"process covariance underestimates stream accelerometer noise");
 	}
 
@@ -183,10 +182,17 @@ namespace {
 	}
 
 	void test_kalman_covariance_remains_symmetric_and_finite() {
-		FixedKalmanFilter filter({0.0, 0.0, 0.0}, {1.0, 2.0, 3.0}, {1e-2, 1.0, 11.345});
+		KalmanFilter filter({0.0, 0.0, 0.0}, {1.0, 2.0, 3.0});
 		filter.predict({0.1, -0.2, 0.3}, 0.01);
 		filter.update_gps({0.02, 0.01, 0.04});
-		require(filter.invariants_hold(), "fixed covariance invariants failed");
+		for (std::size_t row = 0; row < 6; ++row) {
+			for (std::size_t column = 0; column < 6; ++column) {
+				const double value = filter.state_covariance()(row, column);
+				require(std::isfinite(value), "original covariance became non-finite");
+				require_close(value, filter.state_covariance()(column, row),
+					"original covariance lost symmetry");
+			}
+		}
 	}
 
 	void test_sensor_state_initializes_and_predicts_with_si_units() {
@@ -224,58 +230,48 @@ namespace {
 		require_close(state.estimated_position()[1], 10.0, "yaw did not rotate velocity to Y axis");
 	}
 
-	void test_sensor_state_corrects_noisy_initial_yaw() {
-		SensorState state({0.1, 10.0, 11.345});
+	void test_sensor_state_ignores_direction_after_initialization() {
+		SensorState state;
 		SensorUpdate initial;
 		initial.time = 0.0;
-		initial.initial_position = Vector<double>{0, 0, 0};
-		initial.initial_speed_kmh = 57.6;
-		initial.direction = Vector<double>{0, 0, -0.01};
-		initial.acceleration = Vector<double>{0, 0, 0};
+		initial.initial_position = Vector<double>{0.0, 0.0, 0.0};
+		initial.initial_speed_kmh = 36.0;
+		initial.direction = Vector<double>{0.0, 0.0, 0.0};
+		initial.acceleration = Vector<double>{0.0, 0.0, 0.0};
 		state.apply(initial);
-		for (int step = 1; step <= 100; ++step) {
-			SensorUpdate next;
-			next.time = step * 0.01;
-			next.acceleration = Vector<double>{0, 0, 0};
-			next.direction = Vector<double>{0, 0, 0};
-			state.apply(next);
-		}
-		if (std::abs(state.estimated_position()[1]) >= 0.10 ||
-			std::abs(state.filter_snapshot().velocity[1]) >= 0.03) {
-			throw std::runtime_error("fresh direction did not correct initial yaw");
-		}
+
+		SensorUpdate next;
+		next.time = 1.0;
+		next.acceleration = Vector<double>{0.0, 0.0, 0.0};
+		next.direction = Vector<double>{0.0, 0.0, 0.01};
+		state.apply(next);
+		SensorUpdate following;
+		following.time = 2.0;
+		following.acceleration = Vector<double>{0.0, 0.0, 0.0};
+		state.apply(following);
+		require_close(state.estimated_position()[0], 20.0,
+			"later direction changed original filter X motion");
+		require_close(state.estimated_position()[1], 0.0,
+			"later direction changed original filter Y motion");
 	}
 
-	void test_sensor_state_uses_only_fresh_direction_and_keeps_gps_accounting() {
-		SensorState state({0.1, 10.0, 11.345});
+	void test_sensor_state_applies_every_gps_measurement() {
+		SensorState state;
 		SensorUpdate initial;
 		initial.time = 0.0;
-		initial.initial_position = Vector<double>{0, 0, 0};
-		initial.initial_speed_kmh = 57.6;
-		initial.direction = Vector<double>{0, 0, -0.01};
-		initial.acceleration = Vector<double>{0, 0, 0};
+		initial.initial_position = Vector<double>{0.0, 0.0, 0.0};
+		initial.initial_speed_kmh = 0.0;
+		initial.direction = Vector<double>{0.0, 0.0, 0.0};
 		state.apply(initial);
-		SensorUpdate fresh;
-		fresh.time = 0.01;
-		fresh.acceleration = Vector<double>{0, 0, 0};
-		fresh.direction = Vector<double>{0, 0, 0};
-		state.apply(fresh);
-		const double corrected_vy = state.filter_snapshot().velocity[1];
-		SensorUpdate missing;
-		missing.time = 0.02;
-		missing.acceleration = Vector<double>{0, 0, 0};
-		state.apply(missing);
-		if (std::abs(state.filter_snapshot().velocity[1] - corrected_vy) > 1e-12) {
-			throw std::runtime_error("cached direction was applied twice");
-		}
-		SensorUpdate both;
-		both.time = 0.03;
-		both.direction = Vector<double>{0, 0, 0};
-		both.gps = Vector<double>{0.48, 0, 0};
-		state.apply(both);
-		if (state.accepted_gps_count() != 1 || state.rejected_gps_count() != 0) {
-			throw std::runtime_error("direction update changed GPS accounting");
-		}
+		SensorUpdate gps;
+		gps.time = 1.0;
+		gps.acceleration = Vector<double>{0.0, 0.0, 0.0};
+		gps.gps = Vector<double>{1000.0, 0.0, 0.0};
+		state.apply(gps);
+		require(state.estimated_position()[0] > 0.0,
+			"original filter rejected a GPS measurement");
+		require(state.accepted_gps_count() == 1 && state.rejected_gps_count() == 0,
+			"original GPS accounting included a rejection");
 	}
 
 	void test_sensor_state_handles_midnight_rollover() {
@@ -335,7 +331,6 @@ int main() {
 	try {
 		run_option_tests();
 		run_fixed_kalman_filter_tests();
-		run_noise_adaptation_tests();
 		run_filter_stats_tests();
 		run_telemetry_packet_tests();
 		run_telemetry_publisher_tests();
@@ -360,8 +355,8 @@ int main() {
 		test_kalman_covariance_remains_symmetric_and_finite();
 		test_sensor_state_initializes_and_predicts_with_si_units();
 		test_sensor_state_uses_yaw_for_initial_velocity();
-		test_sensor_state_corrects_noisy_initial_yaw();
-		test_sensor_state_uses_only_fresh_direction_and_keeps_gps_accounting();
+		test_sensor_state_ignores_direction_after_initialization();
+		test_sensor_state_applies_every_gps_measurement();
 		test_sensor_state_handles_midnight_rollover();
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();

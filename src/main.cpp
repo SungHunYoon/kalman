@@ -40,8 +40,7 @@ int main(int argc, char** argv) {
 
 		UDPClient client(host, port);
 		MessageAssembler assembler;
-		SensorState sensor_state({options.accel_sigma, options.gps_sigma,
-			options.gate_threshold});
+		SensorState sensor_state;
 		Parser parser;
 		TelemetryBuilder telemetry_builder;
 		std::optional<TelemetryPublisher> telemetry_publisher;

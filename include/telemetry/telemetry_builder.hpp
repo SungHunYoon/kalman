@@ -1,6 +1,6 @@
 #pragma once
 
-#include "filter/fixed_kalman_filter.hpp"
+#include "filter/filter_snapshot.hpp"
 #include "performance/filter_stats.hpp"
 #include "protocol/sensor_update.hpp"
 #include "telemetry/telemetry_packet.hpp"

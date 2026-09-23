@@ -23,23 +23,15 @@ namespace {
 		return elapsed;
 	}
 
-	Vector3d to_vector3d(const Vector<double>& vector) {
-		return Vector3d{vector[0], vector[1], vector[2]};
-	}
-
-	Vector<double> to_vector(const Vector3d& vector) {
-		return Vector<double>{vector[0], vector[1], vector[2]};
-	}
 }
 
-SensorState::SensorState(const FilterConfig& filter_config)
+SensorState::SensorState()
 	: filter_time(0.0),
 	  speed_kmh(0.0),
 	  acceleration(3, 0.0),
 	  direction(3, 0.0),
 	  initial_position(3, 0.0),
 	  estimate(3, 0.0),
-	  config(filter_config),
 	  last_gps_result_(),
 	  timing_stats_(),
 	  has_initial_position(false),
@@ -73,10 +65,9 @@ void SensorState::apply(const SensorUpdate& update) {
 	}
 
 	if (!filter && has_initial_position && has_speed && has_direction) {
-		filter.emplace(to_vector3d(initial_position),
-			to_vector3d(initial_velocity(speed_kmh, direction)), config);
+		filter.emplace(initial_position, initial_velocity(speed_kmh, direction));
 		filter_time = update.time;
-		estimate = to_vector(filter->snapshot().position);
+		estimate = filter->position();
 		return;
 	}
 	if (!filter) {
@@ -85,17 +76,20 @@ void SensorState::apply(const SensorUpdate& update) {
 
 	const auto started = std::chrono::steady_clock::now();
 	last_gps_result_ = GpsUpdateResult{};
-	filter->predict(to_vector3d(acceleration), dt);
+	filter->predict(acceleration, dt);
 	filter_time = update.time;
-	if (update.direction) {
-		(void)filter->update_direction(to_vector3d(*update.direction));
-	}
 	if (update.gps) {
-		last_gps_result_ = filter->update_gps(to_vector3d(*update.gps));
+		const Vector<double> predicted_position = filter->position();
+		for (std::size_t axis = 0; axis < 3; ++axis) {
+			last_gps_result_.innovation[axis] = (*update.gps)[axis] - predicted_position[axis];
+		}
+		filter->update_gps(*update.gps);
+		last_gps_result_.accepted = true;
+		++applied_gps_count_;
 	}
 	const auto finished = std::chrono::steady_clock::now();
 	timing_stats_.record(std::chrono::duration<double, std::micro>(finished - started).count());
-	estimate = to_vector(filter->snapshot().position);
+	estimate = filter->position();
 }
 
 bool SensorState::has_estimated_position() const {
@@ -107,7 +101,20 @@ const Vector<double>& SensorState::estimated_position() const {
 }
 
 FilterSnapshot SensorState::filter_snapshot() const {
-	return filter ? filter->snapshot() : FilterSnapshot{};
+	FilterSnapshot result;
+	if (!filter) {
+		return result;
+	}
+	const Vector<double> position = filter->position();
+	const Vector<double> velocity = filter->velocity();
+	const Matrix<double>& covariance = filter->state_covariance();
+	for (std::size_t axis = 0; axis < 3; ++axis) {
+		result.position[axis] = position[axis];
+		result.velocity[axis] = velocity[axis];
+		result.position_variance[axis] = covariance(axis, axis);
+		result.gps_variance[axis] = 1.0;
+	}
+	return result;
 }
 
 GpsUpdateResult SensorState::last_gps_result() const {
@@ -115,11 +122,11 @@ GpsUpdateResult SensorState::last_gps_result() const {
 }
 
 std::uint64_t SensorState::accepted_gps_count() const {
-	return filter ? filter->accepted_gps_count() : 0;
+	return applied_gps_count_;
 }
 
 std::uint64_t SensorState::rejected_gps_count() const {
-	return filter ? filter->rejected_gps_count() : 0;
+	return 0;
 }
 
 FilterTimingSnapshot SensorState::timing_snapshot() const {

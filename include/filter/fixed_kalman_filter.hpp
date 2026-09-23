@@ -1,6 +1,7 @@
 #pragma once
 
 #include "filter/fixed_math.hpp"
+#include "filter/filter_snapshot.hpp"
 #include "filter/noise_adaptation.hpp"
 
 #include <cstddef>
@@ -12,19 +13,6 @@ struct FilterConfig {
 	bool adaptive_noise = true;
 	bool innovation_gating = true;
 	double direction_sigma = 0.01;
-};
-
-struct FilterSnapshot {
-	Vector3d position{};
-	Vector3d velocity{};
-	Vector3d position_variance{};
-	Vector3d gps_variance{};
-};
-
-struct GpsUpdateResult {
-	bool accepted = false;
-	Vector3d innovation{};
-	double mahalanobis_squared = 0.0;
 };
 
 class FixedKalmanFilter {

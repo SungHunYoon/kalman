@@ -1,6 +1,7 @@
 #pragma once
 
-#include "filter/fixed_kalman_filter.hpp"
+#include "filter/filter_snapshot.hpp"
+#include "filter/kalman_filter.hpp"
 #include "linear_algebra/vector.hpp"
 #include "performance/filter_stats.hpp"
 #include "protocol/sensor_update.hpp"
@@ -15,17 +16,17 @@ class SensorState {
 		Vector<double> direction;
 		Vector<double> initial_position;
 		Vector<double> estimate;
-		FilterConfig config;
 		GpsUpdateResult last_gps_result_;
 		FilterStats timing_stats_;
+		std::uint64_t applied_gps_count_ = 0;
 
 		bool has_initial_position;
 		bool has_speed;
 		bool has_direction;
-		std::optional<FixedKalmanFilter> filter;
+		std::optional<KalmanFilter> filter;
 
 	public:
-		explicit SensorState(const FilterConfig& config = {1e-2, 1.0, 11.345});
+		SensorState();
 
 		void apply(const SensorUpdate& update);
 		bool has_estimated_position() const;
