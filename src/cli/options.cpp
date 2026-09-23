@@ -1,9 +1,7 @@
 #include "cli/options.hpp"
 
 #include <cerrno>
-#include <cmath>
 #include <cstdlib>
-#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -12,16 +10,6 @@ namespace {
 			throw std::invalid_argument(std::string("missing value for ") + argv[index]);
 		}
 		return argv[++index];
-	}
-
-	double parse_positive_double(const char* option, const char* text) {
-		errno = 0;
-		char* end = nullptr;
-		const double value = std::strtod(text, &end);
-		if (errno == ERANGE || end == text || *end != '\0' || !std::isfinite(value) || value <= 0.0) {
-			throw std::invalid_argument(std::string("invalid value for ") + option + ": " + text);
-		}
-		return value;
 	}
 
 	std::uint16_t parse_port(const char* text) {
@@ -42,13 +30,7 @@ AppOptions parse_options(int argc, char** argv) {
 		if (option == "--help") {
 			throw HelpRequested();
 		}
-		if (option == "--accel-sigma") {
-			options.accel_sigma = parse_positive_double(argv[index], take_value(argc, argv, index));
-		} else if (option == "--gps-sigma") {
-			options.gps_sigma = parse_positive_double(argv[index], take_value(argc, argv, index));
-		} else if (option == "--gate-threshold") {
-			options.gate_threshold = parse_positive_double(argv[index], take_value(argc, argv, index));
-		} else if (option == "--telemetry-host") {
+		if (option == "--telemetry-host") {
 			options.telemetry_host = take_value(argc, argv, index);
 			if (options.telemetry_host.empty()) {
 				throw std::invalid_argument("telemetry host must not be empty");
@@ -66,9 +48,6 @@ AppOptions parse_options(int argc, char** argv) {
 
 std::string usage(const char* program) {
 	return std::string("Usage: ") + program + " [options]\n"
-		"  --accel-sigma <positive number>\n"
-		"  --gps-sigma <positive number>\n"
-		"  --gate-threshold <positive number>\n"
 		"  --telemetry-host <IPv4 address>\n"
 		"  --telemetry-port <1..65535>\n"
 		"  --no-telemetry\n"

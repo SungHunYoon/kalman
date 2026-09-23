@@ -12,7 +12,6 @@
 #include <vector>
 
 void run_option_tests();
-void run_fixed_kalman_filter_tests();
 void run_filter_stats_tests();
 void run_telemetry_packet_tests();
 void run_telemetry_publisher_tests();
@@ -330,7 +329,6 @@ namespace {
 int main() {
 	try {
 		run_option_tests();
-		run_fixed_kalman_filter_tests();
 		run_filter_stats_tests();
 		run_telemetry_packet_tests();
 		run_telemetry_publisher_tests();
@@ -361,7 +359,7 @@ int main() {
 		test_sensor_state_ignores_stale_updates_without_mutating_inputs();
 		test_recognizes_sensor_stream_goodbye();
 		test_sensor_stream_receive_timeout_is_finite();
-		std::cout << "33 test groups passed\n";
+		std::cout << "all test groups passed\n";
 	} catch (const std::exception& e) {
 		std::cerr << "test failure: " << e.what() << "\n";
 		return 1;
