@@ -39,7 +39,19 @@ Renderer::~Renderer() {
 bool Renderer::should_close() const { return WindowShouldClose(); }
 
 void Renderer::update_controls(ViewerModel& model) {
-	if (IsKeyPressed(KEY_F)) follow_ = !follow_;
+	const double forward = static_cast<double>(IsKeyDown(KEY_W)) - IsKeyDown(KEY_S);
+	const double right = static_cast<double>(IsKeyDown(KEY_D)) - IsKeyDown(KEY_A);
+	const double up = static_cast<double>(IsKeyDown(KEY_E)) - IsKeyDown(KEY_Q);
+	const bool moving = forward != 0.0 || right != 0.0 || up != 0.0;
+	follow_ = camera_follow_enabled(follow_, IsKeyPressed(KEY_F), moving);
+	if (moving) {
+		const double speed = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT) ? 40.0 : 10.0;
+		const Vector3d delta = camera_move_delta(impl_->yaw, forward, right, up,
+			std::min(static_cast<double>(GetFrameTime()), 0.1), speed);
+		for (std::size_t axis = 0; axis < impl_->target.size(); ++axis) {
+			impl_->target[axis] += delta[axis];
+		}
+	}
 	if (IsKeyPressed(KEY_SPACE)) {
 		paused_ = !paused_;
 		model.set_history_paused(paused_);
@@ -107,7 +119,7 @@ void Renderer::draw(const ViewerModel& model) {
 	}
 	EndMode3D();
 
-	DrawRectangle(12, 12, 720, 264, Fade(BLACK, 0.72f));
+	DrawRectangle(12, 12, 720, 290, Fade(BLACK, 0.72f));
 	DrawText(snapshot.connected ? "CONNECTED" : "DISCONNECTED", 24, 22, 20,
 		snapshot.connected ? GREEN : RED);
 	if (snapshot.has_packet) {
@@ -140,6 +152,9 @@ void Renderer::draw(const ViewerModel& model) {
 			static_cast<unsigned long long>(snapshot.latest.accepted_gps_count),
 			paused_ ? "PAUSED" : "LIVE"), 24, 220, 18, RAYWHITE);
 	}
+	DrawText(TextFormat("WASD move  Q/E height  Shift fast  F follow [%s]",
+		follow_ ? "ON" : "OFF"), 24, 246, 16, RAYWHITE);
+	DrawText("Drag orbit  Wheel zoom  Space pause  R clear", 24, 270, 16, RAYWHITE);
 	DrawFPS(GetScreenWidth() - 100, 20);
 	EndDrawing();
 }

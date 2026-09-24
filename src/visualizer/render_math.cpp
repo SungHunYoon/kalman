@@ -20,3 +20,17 @@ Vector3d smoothed_target(const Vector3d& current, const Vector3d& desired,
 	}
 	return result;
 }
+
+Vector3d camera_move_delta(double yaw, double forward, double right, double up,
+	double elapsed_seconds, double speed) noexcept {
+	const double distance = elapsed_seconds * speed /
+		std::max(1.0, std::hypot(forward, right, up));
+	return {distance * (-forward * std::cos(yaw) + right * std::sin(yaw)),
+		distance * (-forward * std::sin(yaw) - right * std::cos(yaw)),
+		distance * up};
+}
+
+bool camera_follow_enabled(bool currently_enabled, bool toggle_requested,
+	bool manual_movement) noexcept {
+	return !manual_movement && (toggle_requested ? !currently_enabled : currently_enabled);
+}
