@@ -39,12 +39,12 @@ SensorState::SensorState()
 	  has_direction(false),
 	  filter() {}
 
-void SensorState::apply(const SensorUpdate& update) {
+bool SensorState::apply(const SensorUpdate& update) {
 	double dt = 0.0;
 	if (filter) {
 		dt = elapsed_seconds(filter_time, update.time);
 		if (dt <= 0.0) {
-			return;
+			return false;
 		}
 	}
 
@@ -68,10 +68,10 @@ void SensorState::apply(const SensorUpdate& update) {
 		filter.emplace(initial_position, initial_velocity(speed_kmh, direction));
 		filter_time = update.time;
 		estimate = filter->position();
-		return;
+		return true;
 	}
 	if (!filter) {
-		return;
+		return false;
 	}
 
 	const auto started = std::chrono::steady_clock::now();
@@ -90,6 +90,7 @@ void SensorState::apply(const SensorUpdate& update) {
 	const auto finished = std::chrono::steady_clock::now();
 	timing_stats_.record(std::chrono::duration<double, std::micro>(finished - started).count());
 	estimate = filter->position();
+	return true;
 }
 
 bool SensorState::has_estimated_position() const {

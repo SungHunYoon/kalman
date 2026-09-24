@@ -28,7 +28,7 @@ class SensorState {
 	public:
 		SensorState();
 
-		void apply(const SensorUpdate& update);
+		bool apply(const SensorUpdate& update);
 		bool has_estimated_position() const;
 		const Vector<double>& estimated_position() const;
 		FilterSnapshot filter_snapshot() const;

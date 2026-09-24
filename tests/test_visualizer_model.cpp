@@ -59,6 +59,18 @@ void run_visualizer_model_tests() {
 	if (model.snapshot(now + std::chrono::seconds(3)).connected) {
 		throw std::runtime_error("reordered packet extended connection status");
 	}
+	TelemetryPacket restarted;
+	restarted.sequence = 0;
+	restarted.estimate_position = {99, 0, 0};
+	restarted.filter_duration_us = 5.0;
+	model.accept(restarted, now + std::chrono::milliseconds(100));
+	const ViewerSnapshot restart_state = model.snapshot(now + std::chrono::milliseconds(100));
+	if (!restart_state.connected || restart_state.latest.sequence != 0 ||
+		restart_state.lost_packets != 0 || restart_state.timing.count != 1 ||
+		model.trajectory().estimate_count() != 1 ||
+		model.trajectory().estimate_at(0) != Vector3d{99, 0, 0}) {
+		throw std::runtime_error("viewer did not reset for a restarted client");
+	}
 
 	ViewerModel wrapped;
 	TelemetryPacket near_wrap;

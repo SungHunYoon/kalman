@@ -74,6 +74,19 @@ void run_telemetry_integration_tests() {
 		throw std::runtime_error("original filter telemetry did not survive codec");
 	}
 
+	SensorUpdate stale;
+	stale.time = 1.5;
+	stale.acceleration = Vector<double>{100, 0, 0};
+	stale.gps = Vector<double>{999, 0, 0};
+	std::size_t stale_responses = 0;
+	process_message(state, stale, builder,
+		[&stale_responses](const Vector<double>&) { ++stale_responses; },
+		[&packets](const TelemetryPacket& packet) { packets.push_back(packet); });
+	if (stale_responses != 1 || packets.size() != 2 ||
+		state.accepted_gps_count() != 1 || state.rejected_gps_count() != 0) {
+		throw std::runtime_error("ignored stale GPS was published or applied");
+	}
+
 	GpsUpdateResult legacy_rejected;
 	const TelemetryPacket applied = builder.build(measured, state.filter_snapshot(),
 		legacy_rejected, state.timing_snapshot(), 1, 0);

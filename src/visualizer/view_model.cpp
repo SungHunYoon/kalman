@@ -5,6 +5,18 @@
 
 void ViewerModel::accept(const TelemetryPacket& packet,
 	std::chrono::steady_clock::time_point now) {
+	// A new client starts its sequence at zero. Preserve the true uint64 wrap
+	// from max to zero, but discard the previous client's session state.
+	if (state_.has_packet && packet.sequence == 0 && state_.latest.sequence != 0 &&
+		state_.latest.sequence != std::numeric_limits<std::uint64_t>::max()) {
+		const std::uint64_t malformed = state_.malformed_packets;
+		const std::uint64_t invalid = state_.invalid_packets;
+		state_ = ViewerSnapshot{};
+		state_.malformed_packets = malformed;
+		state_.invalid_packets = invalid;
+		timing_stats_ = FilterStats{0};
+		trajectory_.clear();
+	}
 	if (state_.has_packet) {
 		const std::uint64_t delta = packet.sequence - state_.latest.sequence;
 		const bool newer = delta != 0 && delta <= std::numeric_limits<std::uint64_t>::max() / 2;
