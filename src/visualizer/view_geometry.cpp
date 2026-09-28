@@ -2,6 +2,65 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <locale>
+#include <sstream>
+
+Bounds3d padded_axis_bounds(const Bounds3d& raw) noexcept {
+	Bounds3d result = raw;
+	double longest = 1.0;
+	for (std::size_t axis = 0; axis < 3; ++axis) {
+		longest = std::max(longest, raw.max[axis] - raw.min[axis]);
+	}
+	for (std::size_t axis = 0; axis < 3; ++axis) {
+		const double padding = std::max(0.05 * (raw.max[axis] - raw.min[axis]), 0.02 * longest);
+		result.min[axis] -= padding;
+		result.max[axis] += padding;
+	}
+	return result;
+}
+
+double nice_tick_step(double span) noexcept {
+	if (!std::isfinite(span) || span <= 0.0) return 1.0;
+	const double raw = span / 5.0;
+	if (raw == 0.0) return 1.0;
+	const double magnitude = std::pow(10.0, std::floor(std::log10(raw)));
+	if (magnitude == 0.0) return raw;
+	double best = magnitude;
+	for (double multiplier : {2.0, 5.0, 10.0}) {
+		const double candidate = multiplier * magnitude;
+		if (std::abs(candidate - raw) < std::abs(best - raw)) best = candidate;
+	}
+	return best;
+}
+
+std::vector<double> axis_ticks(double minimum, double maximum, double step) {
+	std::vector<double> ticks;
+	if (!std::isfinite(minimum) || !std::isfinite(maximum) ||
+		!std::isfinite(step) || step <= 0.0 || minimum > maximum) return ticks;
+	const double first = std::ceil(minimum / step);
+	for (int index = 0; index < 12; ++index) {
+		const double value = (first + index) * step;
+		if (!std::isfinite(value) || value > maximum ||
+			(!ticks.empty() && value <= ticks.back())) break;
+		if (value >= minimum) ticks.push_back(value == 0.0 ? 0.0 : value);
+	}
+	return ticks;
+}
+
+std::string format_axis_tick(double value, double step) {
+	if (!std::isfinite(value) || !std::isfinite(step) || step <= 0.0) return {};
+	const int precision = std::max(0, static_cast<int>(-std::floor(std::log10(step))));
+	std::ostringstream output;
+	output.imbue(std::locale::classic());
+	output << std::fixed << std::setprecision(precision) << value;
+	std::string label = output.str();
+	if (label.find('.') != std::string::npos) {
+		while (label.back() == '0') label.pop_back();
+		if (label.back() == '.') label.pop_back();
+	}
+	return label == "-0" ? "0" : label;
+}
 
 ViewMode next_view_mode(ViewMode current, bool whole_view_pressed,
 	bool follow_pressed, bool manual_input) noexcept {

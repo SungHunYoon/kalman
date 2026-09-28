@@ -1,6 +1,13 @@
 #pragma once
 
 #include "visualizer/trajectory_buffer.hpp"
+#include <string>
+#include <vector>
+
+Bounds3d padded_axis_bounds(const Bounds3d& raw) noexcept;
+double nice_tick_step(double span) noexcept;
+std::vector<double> axis_ticks(double minimum, double maximum, double step);
+std::string format_axis_tick(double value, double step);
 
 struct CameraFit {
 	Vector3d target;

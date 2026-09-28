@@ -1,6 +1,7 @@
 #include "visualizer/renderer.hpp"
 
 #include "visualizer/render_math.hpp"
+#include "visualizer/axis_frame.hpp"
 
 #include <raylib.h>
 #include <rlgl.h>
@@ -10,10 +11,8 @@
 #include <optional>
 
 namespace {
-	Vector3 to_view(const Vector3d& value) {
-		return Vector3{static_cast<float>(value[0]), static_cast<float>(value[2]),
-			static_cast<float>(value[1])};
-	}
+	constexpr int SCENE_TOP = 206;
+	int scene_height() { return std::max(1, GetScreenHeight() - SCENE_TOP); }
 }
 
 struct Renderer::Impl {
@@ -26,6 +25,7 @@ struct Renderer::Impl {
 	bool force_fit = true;
 	bool smoothing_fit = false;
 	bool entering_follow = false;
+	bool show_details = false;
 };
 
 Renderer::Renderer(int width, int height) : impl_(new Impl) {
@@ -92,7 +92,7 @@ void Renderer::update_controls(ViewerModel& model) {
 		}
 		if (panning) {
 			const Vector3d delta = screen_pan_delta(impl_->yaw, impl_->pitch,
-				mouse_delta.x, mouse_delta.y, impl_->vertical_size, GetScreenHeight());
+				mouse_delta.x, mouse_delta.y, impl_->vertical_size, scene_height());
 			for (std::size_t axis = 0; axis < impl_->target.size(); ++axis) {
 				impl_->target[axis] += delta[axis];
 			}
@@ -112,15 +112,16 @@ void Renderer::update_controls(ViewerModel& model) {
 	}
 	if (IsKeyPressed(KEY_G)) show_gps_ = !show_gps_;
 	if (IsKeyPressed(KEY_C)) show_covariance_ = !show_covariance_;
+	if (IsKeyPressed(KEY_TAB)) impl_->show_details = !impl_->show_details;
 }
 
 void Renderer::draw(const ViewerModel& model) {
 	const ViewerSnapshot snapshot = model.snapshot(std::chrono::steady_clock::now());
 	const auto bounds = model.trajectory().estimate_bounds();
 	const Bounds3d reference_bounds{{-1.0, -1.0, -1.0}, {1.0, 1.0, 1.0}};
-	const Bounds3d& fitted_bounds = bounds ? *bounds : reference_bounds;
+	const Bounds3d fitted_bounds = bounds ? padded_axis_bounds(*bounds) : reference_bounds;
 	const CameraFit fit = fit_estimate_bounds(fitted_bounds, impl_->yaw, impl_->pitch,
-		GetScreenWidth(), GetScreenHeight());
+		GetScreenWidth(), scene_height());
 	if (mode_ == ViewMode::Overview) {
 		bool expanding = false;
 		bool contracting = false;
@@ -165,14 +166,21 @@ void Renderer::draw(const ViewerModel& model) {
 	}
 	impl_->previous_bounds = bounds;
 	impl_->force_fit = false;
-	const Vector3 target = to_view(impl_->target);
+	// Compose the scene below the compact panel while keeping raylib's full-window
+	// projection so GetWorldToScreen uses the same coordinates as the 3D drawing.
+	const double screen_shift = 0.5 * SCENE_TOP * impl_->vertical_size / scene_height();
+	Vector3d composed_target = impl_->target;
+	composed_target[0] -= screen_shift * std::sin(impl_->pitch) * std::cos(impl_->yaw);
+	composed_target[1] -= screen_shift * std::sin(impl_->pitch) * std::sin(impl_->yaw);
+	composed_target[2] += screen_shift * std::cos(impl_->pitch);
+	const Vector3 target = to_view(composed_target);
 	const Vector3d extent{std::max(std::abs(fitted_bounds.min[0] - impl_->target[0]),
 			std::abs(fitted_bounds.max[0] - impl_->target[0])),
 		std::max(std::abs(fitted_bounds.min[1] - impl_->target[1]),
 			std::abs(fitted_bounds.max[1] - impl_->target[1])),
 		std::max(std::abs(fitted_bounds.min[2] - impl_->target[2]),
 			std::abs(fitted_bounds.max[2] - impl_->target[2]))};
-	const double radius = std::hypot(extent[0], extent[1], extent[2]);
+	const double radius = std::hypot(extent[0], extent[1], extent[2]) + screen_shift;
 	const double distance = std::max({10.0, fit.camera_distance,
 		2.0 * radius + impl_->vertical_size});
 	const double far_clip = distance + radius + impl_->vertical_size;
@@ -182,34 +190,35 @@ void Renderer::draw(const ViewerModel& model) {
 		target.x + horizontal * std::cos(impl_->yaw),
 		target.y + static_cast<float>(distance * std::sin(impl_->pitch)),
 		target.z + horizontal * std::sin(impl_->yaw)};
-	impl_->camera.fovy = static_cast<float>(impl_->vertical_size);
+	impl_->camera.fovy = static_cast<float>(impl_->vertical_size * GetScreenHeight() / scene_height());
 
 	BeginDrawing();
 	ClearBackground(Color{12, 16, 24, 255});
 	rlSetClipPlanes(0.1, far_clip);
 	BeginMode3D(impl_->camera);
-	DrawGrid(40, 1.0f);
-	DrawLine3D(Vector3{0, 0, 0}, Vector3{5, 0, 0}, RED);
-	DrawLine3D(Vector3{0, 0, 0}, Vector3{0, 5, 0}, GREEN);
-	DrawLine3D(Vector3{0, 0, 0}, Vector3{0, 0, 5}, BLUE);
+	draw_axis_frame_3d(fitted_bounds);
 	const TrajectoryBuffer& trajectory = model.trajectory();
-	for (std::size_t index = 1; index < trajectory.estimate_count(); ++index) {
+	const std::size_t count = trajectory.estimate_count();
+	const float marker_radius = static_cast<float>(impl_->vertical_size * 0.007);
+	for (std::size_t index = 1; index < count; ++index) {
+		const float progress = static_cast<float>(index) / static_cast<float>(count - 1);
 		DrawLine3D(to_view(trajectory.estimate_at(index - 1)),
-			to_view(trajectory.estimate_at(index)), SKYBLUE);
+			to_view(trajectory.estimate_at(index)), ColorLerp(SKYBLUE, ORANGE, progress));
+	}
+	if (count != 0) {
+		DrawSphere(to_view(trajectory.estimate_at(0)), marker_radius, GREEN);
+		DrawSphere(to_view(trajectory.estimate_at(count - 1)), marker_radius, ORANGE);
 	}
 	if (show_gps_) {
 		for (std::size_t index = 0; index < trajectory.gps_count(); ++index) {
-			DrawSphere(to_view(trajectory.gps_at(index)), 0.08f, ORANGE);
+			DrawSphere(to_view(trajectory.gps_at(index)), marker_radius * 0.35f,
+				Color{120, 130, 160, 130});
 		}
 	}
 	if (snapshot.has_packet) {
 		const Vector3 position = to_view(snapshot.latest.estimate_position);
-		DrawSphere(position, 0.18f, YELLOW);
-		const Vector3 velocity = to_view(snapshot.latest.estimate_velocity);
-		const float speed = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
-		if (speed > 1e-6f) {
-			DrawLine3D(position, Vector3{position.x + velocity.x / speed * 2.0f,
-				position.y + velocity.y / speed * 2.0f, position.z + velocity.z / speed * 2.0f}, LIME);
+		if (snapshot.connected) {
+			DrawSphereWires(position, marker_radius * 1.7f, 8, 12, YELLOW);
 		}
 		if (show_covariance_) {
 			const float rx = static_cast<float>(covariance_radius(snapshot.latest.position_variance[0]));
@@ -223,44 +232,66 @@ void Renderer::draw(const ViewerModel& model) {
 		}
 	}
 	EndMode3D();
+	draw_axis_labels_2d(fitted_bounds, impl_->camera);
+	if (count != 0) {
+		draw_world_label(trajectory.estimate_history_truncated() ? "Oldest retained" : "Start",
+			trajectory.estimate_at(0), impl_->camera, 18, GREEN, -24);
+		draw_world_label("End", trajectory.estimate_at(count - 1), impl_->camera, 18, ORANGE);
+	} else {
+		const char* waiting = "Waiting for estimated trajectory";
+		DrawText(waiting, (GetScreenWidth() - MeasureText(waiting, 22)) / 2,
+			GetScreenHeight() / 2 + 50, 22, RAYWHITE);
+	}
 
-	DrawRectangle(12, 12, 720, 290, Fade(BLACK, 0.72f));
-	DrawText(snapshot.connected ? "CONNECTED" : "DISCONNECTED", 24, 22, 20,
-		snapshot.connected ? GREEN : RED);
-	if (snapshot.has_packet) {
+	DrawRectangle(12, 12, 442, 182, Fade(BLACK, 0.82f));
+	DrawText(TextFormat("%s  |  %s  %s",
+		snapshot.connected ? "CONNECTED" : "DISCONNECTED",
+		mode_ == ViewMode::Overview ? "OVERVIEW" :
+		mode_ == ViewMode::Follow ? "FOLLOW" : "MANUAL", paused_ ? "[PAUSED]" : ""),
+		24, 22, 18, snapshot.connected ? GREEN : LIGHTGRAY);
+	DrawText(TextFormat("Retained %llu  |  Lost packets %llu",
+		static_cast<unsigned long long>(count), static_cast<unsigned long long>(snapshot.lost_packets)),
+		24, 47, 16, snapshot.lost_packets ? YELLOW : RAYWHITE);
+	DrawText(trajectory.estimate_history_truncated() ? "History truncated - oldest samples overwritten" :
+		"Path: received estimates retained in memory", 24, 69, 16,
+		trajectory.estimate_history_truncated() ? YELLOW : LIGHTGRAY);
+	DrawText("H whole view   F follow   1/2/3 top/front/side", 24, 94, 16, RAYWHITE);
+	DrawText("Left drag orbit   Right drag pan   Wheel zoom", 24, 114, 16, RAYWHITE);
+	DrawText("WASD move   Q/E height   Shift fast", 24, 134, 16, RAYWHITE);
+	DrawText(TextFormat("Space pause  R clear  G GPS:%s  C cov:%s",
+		show_gps_ ? "on" : "off", show_covariance_ ? "on" : "off"), 24, 154, 15, RAYWHITE);
+	DrawText("Tab details   Esc close", 24, 174, 15, LIGHTGRAY);
+	if (impl_->show_details && snapshot.has_packet) {
+		DrawRectangle(12, 202, 670, 222, Fade(BLACK, 0.82f));
 		DrawText(TextFormat("seq %llu  lost %llu  malformed %llu  invalid %llu",
 			static_cast<unsigned long long>(snapshot.latest.sequence),
 			static_cast<unsigned long long>(snapshot.lost_packets),
 			static_cast<unsigned long long>(snapshot.malformed_packets),
-			static_cast<unsigned long long>(snapshot.invalid_packets)), 24, 50, 18, RAYWHITE);
+			static_cast<unsigned long long>(snapshot.invalid_packets)), 24, 212, 18, RAYWHITE);
 		DrawText(TextFormat("pos %.3f %.3f %.3f", snapshot.latest.estimate_position[0],
-			snapshot.latest.estimate_position[1], snapshot.latest.estimate_position[2]), 24, 76, 18, RAYWHITE);
+			snapshot.latest.estimate_position[1], snapshot.latest.estimate_position[2]), 24, 238, 18, RAYWHITE);
 		DrawText(TextFormat("vel %.3f %.3f %.3f", snapshot.latest.estimate_velocity[0],
-			snapshot.latest.estimate_velocity[1], snapshot.latest.estimate_velocity[2]), 24, 100, 18, RAYWHITE);
+			snapshot.latest.estimate_velocity[1], snapshot.latest.estimate_velocity[2]), 24, 262, 18, RAYWHITE);
 		DrawText(TextFormat("acc %.3f %.3f %.3f", snapshot.latest.acceleration[0],
-			snapshot.latest.acceleration[1], snapshot.latest.acceleration[2]), 24, 124, 18, RAYWHITE);
+			snapshot.latest.acceleration[1], snapshot.latest.acceleration[2]), 24, 286, 18, RAYWHITE);
 		DrawText(TextFormat("filter us now %.3f avg %.3f p95 %.3f p99 %.3f max %.3f",
 			snapshot.timing.current, snapshot.timing.average, snapshot.timing.p95,
-			snapshot.timing.p99, snapshot.timing.maximum), 24, 148, 18, RAYWHITE);
+			snapshot.timing.p99, snapshot.timing.maximum), 24, 310, 18, RAYWHITE);
 		DrawText(TextFormat("GPS model variance %.3f %.3f %.3f",
 			snapshot.latest.adaptive_gps_variance[0],
 			snapshot.latest.adaptive_gps_variance[1],
-			snapshot.latest.adaptive_gps_variance[2]), 24, 172, 18, RAYWHITE);
+			snapshot.latest.adaptive_gps_variance[2]), 24, 334, 18, RAYWHITE);
 		if (snapshot.has_last_gps_innovation) {
 			DrawText(TextFormat("last innovation norm %.3f",
 				vector_norm(snapshot.last_gps_innovation)),
-				24, 196, 18, RAYWHITE);
+				24, 358, 18, RAYWHITE);
 		} else {
-			DrawText("innovation: waiting for GPS", 24, 196, 18, RAYWHITE);
+			DrawText("innovation: waiting for GPS", 24, 358, 18, RAYWHITE);
 		}
 		DrawText(TextFormat("GPS applied %llu  [%s]",
 			static_cast<unsigned long long>(snapshot.latest.accepted_gps_count),
-			paused_ ? "PAUSED" : "LIVE"), 24, 220, 18, RAYWHITE);
+			paused_ ? "PAUSED" : "LIVE"), 24, 382, 18, RAYWHITE);
 	}
-	DrawText(TextFormat("WASD move  Q/E height  Shift fast  view [%s]",
-		mode_ == ViewMode::Overview ? "OVERVIEW" :
-		mode_ == ViewMode::Follow ? "FOLLOW" : "MANUAL"), 24, 246, 16, RAYWHITE);
-	DrawText("H whole view  F follow  1/2/3 views  Left orbit  Right pan  Wheel zoom", 24, 270, 16, RAYWHITE);
 	DrawFPS(GetScreenWidth() - 100, 20);
 	EndDrawing();
 }

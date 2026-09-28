@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -56,6 +57,49 @@ void require_fitted(const Bounds3d& bounds, double yaw, double pitch,
 }
 
 void run_view_geometry_tests() {
+	if (nice_tick_step(4000.0) != 1000.0 ||
+		axis_ticks(-120.0, 140.0, 100.0) != std::vector<double>{-100.0, 0.0, 100.0} ||
+		format_axis_tick(-100.0, 100.0) != "-100" ||
+		format_axis_tick(0.25, 0.05) != "0.25" ||
+		format_axis_tick(1.0, 0.01) != "1" ||
+		format_axis_tick(-0.0, 0.01) != "0") {
+		throw std::runtime_error("axis tick formatting mismatch");
+	}
+	for (double span : {0.0, -10.0, std::numeric_limits<double>::infinity(),
+		std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::denorm_min()}) {
+		if (!std::isfinite(nice_tick_step(span)) || nice_tick_step(span) <= 0.0) {
+			throw std::runtime_error("invalid span produced an invalid tick step");
+		}
+	}
+	if (!axis_ticks(0.0, 1.0, 0.0).empty() ||
+		!axis_ticks(1.0, 0.0, 1.0).empty() ||
+		!axis_ticks(0.0, std::numeric_limits<double>::infinity(), 1.0).empty() ||
+		!axis_ticks(0.0, 1.0, std::numeric_limits<double>::quiet_NaN()).empty()) {
+		throw std::runtime_error("invalid axis interval produced ticks");
+	}
+	const auto huge_ticks = axis_ticks(-1e200, 1e200, 1e199);
+	const auto tiny_ticks = axis_ticks(-1e200, 1e200, 1e-200);
+	if (huge_ticks.empty() || huge_ticks.size() > 12 || tiny_ticks.size() > 12) {
+		throw std::runtime_error("huge axis range exceeded bounded tick count");
+	}
+	for (std::size_t i = 0; i < huge_ticks.size(); ++i) {
+		if (!std::isfinite(huge_ticks[i]) || (i && huge_ticks[i] <= huge_ticks[i - 1])) {
+			throw std::runtime_error("huge axis ticks are not finite and increasing");
+		}
+	}
+	const Bounds3d flat{{0.0, 0.0, 0.0}, {4000.0, 0.0, 0.0}};
+	const Bounds3d frame = padded_axis_bounds(flat);
+	if (frame.min != Vector3d{-200.0, -80.0, -80.0} ||
+		frame.max != Vector3d{4200.0, 80.0, 80.0}) {
+		throw std::runtime_error("flat route has incorrect padded axis frame");
+	}
+	require_fitted(frame, 0.8, 0.5, 1200, 800);
+	require_fitted(frame, 0.8, 0.5, 600, 1000);
+	const Bounds3d single_frame = padded_axis_bounds(Bounds3d{{0, 0, 0}, {0, 0, 0}});
+	if (single_frame.min != Vector3d{-0.02, -0.02, -0.02} ||
+		single_frame.max != Vector3d{0.02, 0.02, 0.02}) {
+		throw std::runtime_error("single point has collapsed padded axis frame");
+	}
 	if (next_view_mode(ViewMode::Overview, false, false, true) != ViewMode::Manual ||
 		next_view_mode(ViewMode::Follow, false, false, true) != ViewMode::Manual ||
 		next_view_mode(ViewMode::Manual, false, false, false) != ViewMode::Manual ||
