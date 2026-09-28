@@ -1,6 +1,7 @@
 #pragma once
 
 #include "visualizer/view_model.hpp"
+#include "visualizer/view_geometry.hpp"
 
 class Renderer {
 public:
@@ -17,7 +18,7 @@ private:
 	struct Impl;
 	Impl* impl_;
 	bool paused_ = false;
-	bool follow_ = true;
-	bool show_gps_ = true;
-	bool show_covariance_ = true;
+	ViewMode mode_ = ViewMode::Overview;
+	bool show_gps_ = false;
+	bool show_covariance_ = false;
 };

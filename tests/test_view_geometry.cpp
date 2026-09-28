@@ -56,6 +56,27 @@ void require_fitted(const Bounds3d& bounds, double yaw, double pitch,
 }
 
 void run_view_geometry_tests() {
+	if (next_view_mode(ViewMode::Overview, false, false, true) != ViewMode::Manual ||
+		next_view_mode(ViewMode::Follow, false, false, true) != ViewMode::Manual ||
+		next_view_mode(ViewMode::Manual, false, false, false) != ViewMode::Manual ||
+		next_view_mode(ViewMode::Manual, true, true, true) != ViewMode::Overview ||
+		next_view_mode(ViewMode::Overview, false, true, false) != ViewMode::Follow ||
+		next_view_mode(ViewMode::Follow, false, true, false) != ViewMode::Manual) {
+		throw std::runtime_error("camera mode transition mismatch");
+	}
+	const double zoom_in = zoom_vertical_size(1000.0, 1.0);
+	const double zoom_out = zoom_vertical_size(1000.0, -1.0);
+	const Vector3d pan = screen_pan_delta(0.0, 0.0, 100.0, 0.0, 1000.0, 1000);
+	if (!(zoom_in < 1000.0) || !(zoom_out > 1000.0) ||
+		!std::isfinite(zoom_in) || !std::isfinite(zoom_out) ||
+		pan[0] != 0.0 || pan[1] <= 0.0 || pan[2] != 0.0 ||
+		!(camera_move_speed(4000.0) > camera_move_speed(40.0))) {
+		throw std::runtime_error("camera pan zoom or speed mismatch");
+	}
+	const ViewMode after_zoom = next_view_mode(ViewMode::Overview, false, false, true);
+	if (next_view_mode(after_zoom, false, false, false) != ViewMode::Manual) {
+		throw std::runtime_error("stream update reset manual zoom mode");
+	}
 	const Bounds3d point{{2.0, -3.0, 5.0}, {2.0, -3.0, 5.0}};
 	const CameraFit point_fit = fit_estimate_bounds(point, 0.8, 0.5, 1200, 800);
 	if (point_fit.target != point.min) {

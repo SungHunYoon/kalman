@@ -3,6 +3,40 @@
 #include <algorithm>
 #include <cmath>
 
+ViewMode next_view_mode(ViewMode current, bool whole_view_pressed,
+	bool follow_pressed, bool manual_input) noexcept {
+	if (whole_view_pressed) return ViewMode::Overview;
+	if (manual_input) return ViewMode::Manual;
+	if (follow_pressed) return current == ViewMode::Follow ? ViewMode::Manual : ViewMode::Follow;
+	return current;
+}
+
+double zoom_vertical_size(double current_size, double wheel_steps) noexcept {
+	constexpr double MIN_SIZE = 1e-6;
+	constexpr double MAX_SIZE = 1e12;
+	const double size = std::isfinite(current_size) ?
+		std::clamp(current_size, MIN_SIZE, MAX_SIZE) : 1.0;
+	if (!std::isfinite(wheel_steps)) return size;
+	const double exponent = std::clamp(wheel_steps, -1000.0, 1000.0);
+	return std::clamp(size * std::pow(0.85, exponent), MIN_SIZE, MAX_SIZE);
+}
+
+Vector3d screen_pan_delta(double yaw, double pitch, double dx_pixels,
+	double dy_pixels, double vertical_size, int viewport_height) noexcept {
+	const double scale = vertical_size / std::max(1, viewport_height);
+	const double sin_yaw = std::sin(yaw);
+	const double cos_yaw = std::cos(yaw);
+	const double sin_pitch = std::sin(pitch);
+	const double cos_pitch = std::cos(pitch);
+	return {scale * (-dx_pixels * sin_yaw - dy_pixels * sin_pitch * cos_yaw),
+		scale * (dx_pixels * cos_yaw - dy_pixels * sin_pitch * sin_yaw),
+		scale * dy_pixels * cos_pitch};
+}
+
+double camera_move_speed(double vertical_size) noexcept {
+	return std::max(1.0, vertical_size * 0.5);
+}
+
 CameraFit fit_estimate_bounds(const Bounds3d& bounds, double yaw, double pitch,
 	int viewport_width, int viewport_height) noexcept {
 	Vector3d target{};

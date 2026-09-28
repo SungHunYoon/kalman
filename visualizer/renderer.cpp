@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace {
 	Vector3 to_view(const Vector3d& value) {
@@ -20,15 +21,19 @@ struct Renderer::Impl {
 	Vector3d target{};
 	float yaw = 0.8f;
 	float pitch = 0.55f;
-	float distance = 25.0f;
+	double vertical_size = 10.0;
+	std::optional<Bounds3d> previous_bounds;
+	bool force_fit = true;
+	bool smoothing_fit = false;
+	bool entering_follow = false;
 };
 
 Renderer::Renderer(int width, int height) : impl_(new Impl) {
 	InitWindow(width, height, "Kalman 3D Visualizer");
 	SetTargetFPS(60);
 	impl_->camera.up = Vector3{0, 1, 0};
-	impl_->camera.fovy = 45.0f;
-	impl_->camera.projection = CAMERA_PERSPECTIVE;
+	impl_->camera.fovy = static_cast<float>(impl_->vertical_size);
+	impl_->camera.projection = CAMERA_ORTHOGRAPHIC;
 }
 
 Renderer::~Renderer() {
@@ -43,45 +48,145 @@ void Renderer::update_controls(ViewerModel& model) {
 	const double right = static_cast<double>(IsKeyDown(KEY_D)) - IsKeyDown(KEY_A);
 	const double up = static_cast<double>(IsKeyDown(KEY_E)) - IsKeyDown(KEY_Q);
 	const bool moving = forward != 0.0 || right != 0.0 || up != 0.0;
-	follow_ = camera_follow_enabled(follow_, IsKeyPressed(KEY_F), moving);
-	if (moving) {
-		const double speed = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT) ? 40.0 : 10.0;
-		const Vector3d delta = camera_move_delta(impl_->yaw, forward, right, up,
-			std::min(static_cast<double>(GetFrameTime()), 0.1), speed);
-		for (std::size_t axis = 0; axis < impl_->target.size(); ++axis) {
-			impl_->target[axis] += delta[axis];
+	const Vector2 mouse_delta = GetMouseDelta();
+	const bool orbiting = IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+		(mouse_delta.x != 0.0f || mouse_delta.y != 0.0f);
+	const bool panning = IsMouseButtonDown(MOUSE_BUTTON_RIGHT) &&
+		(mouse_delta.x != 0.0f || mouse_delta.y != 0.0f);
+	const double wheel_steps = GetMouseWheelMove();
+	const bool whole_view_pressed = IsKeyPressed(KEY_H);
+	const ViewMode old_mode = mode_;
+	mode_ = next_view_mode(mode_, whole_view_pressed, IsKeyPressed(KEY_F),
+		moving || panning || wheel_steps != 0.0);
+	if (whole_view_pressed) impl_->force_fit = true;
+	if (mode_ == ViewMode::Follow && old_mode != ViewMode::Follow) {
+		impl_->entering_follow = true;
+	}
+	if (orbiting) {
+		impl_->yaw -= mouse_delta.x * 0.006f;
+		impl_->pitch = std::clamp(impl_->pitch + mouse_delta.y * 0.006f, -1.45f, 1.45f);
+		impl_->force_fit = true;
+	}
+	if (IsKeyPressed(KEY_ONE)) {
+		impl_->yaw = 0.0f;
+		impl_->pitch = 1.45f;
+		impl_->force_fit = true;
+	} else if (IsKeyPressed(KEY_TWO)) {
+		impl_->yaw = 1.5707963f;
+		impl_->pitch = 0.0f;
+		impl_->force_fit = true;
+	} else if (IsKeyPressed(KEY_THREE)) {
+		impl_->yaw = 0.0f;
+		impl_->pitch = 0.0f;
+		impl_->force_fit = true;
+	}
+	if (!whole_view_pressed) {
+		if (moving) {
+			const double speed = camera_move_speed(impl_->vertical_size) *
+				((IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 4.0 : 1.0);
+			const Vector3d delta = camera_move_delta(impl_->yaw, forward, right, up,
+				std::clamp(static_cast<double>(GetFrameTime()), 0.0, 0.1), speed);
+			for (std::size_t axis = 0; axis < impl_->target.size(); ++axis) {
+				impl_->target[axis] += delta[axis];
+			}
+		}
+		if (panning) {
+			const Vector3d delta = screen_pan_delta(impl_->yaw, impl_->pitch,
+				mouse_delta.x, mouse_delta.y, impl_->vertical_size, GetScreenHeight());
+			for (std::size_t axis = 0; axis < impl_->target.size(); ++axis) {
+				impl_->target[axis] += delta[axis];
+			}
+		}
+		if (wheel_steps != 0.0) {
+			impl_->vertical_size = zoom_vertical_size(impl_->vertical_size, wheel_steps);
 		}
 	}
 	if (IsKeyPressed(KEY_SPACE)) {
 		paused_ = !paused_;
 		model.set_history_paused(paused_);
 	}
-	if (IsKeyPressed(KEY_R)) model.trajectory().clear();
+	if (IsKeyPressed(KEY_R)) {
+		model.trajectory().clear();
+		impl_->previous_bounds.reset();
+		impl_->force_fit = true;
+	}
 	if (IsKeyPressed(KEY_G)) show_gps_ = !show_gps_;
 	if (IsKeyPressed(KEY_C)) show_covariance_ = !show_covariance_;
-	if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-		const Vector2 delta = GetMouseDelta();
-		impl_->yaw -= delta.x * 0.006f;
-		impl_->pitch = std::clamp(impl_->pitch + delta.y * 0.006f, -1.45f, 1.45f);
-	}
-	impl_->distance = std::clamp(impl_->distance - GetMouseWheelMove() * 2.0f, 2.0f, 500.0f);
 }
 
 void Renderer::draw(const ViewerModel& model) {
 	const ViewerSnapshot snapshot = model.snapshot(std::chrono::steady_clock::now());
-	if (snapshot.has_packet && follow_) {
+	const auto bounds = model.trajectory().estimate_bounds();
+	const Bounds3d reference_bounds{{-1.0, -1.0, -1.0}, {1.0, 1.0, 1.0}};
+	const Bounds3d& fitted_bounds = bounds ? *bounds : reference_bounds;
+	const CameraFit fit = fit_estimate_bounds(fitted_bounds, impl_->yaw, impl_->pitch,
+		GetScreenWidth(), GetScreenHeight());
+	if (mode_ == ViewMode::Overview) {
+		bool expanding = false;
+		bool contracting = false;
+		if (bounds && impl_->previous_bounds) {
+			for (std::size_t axis = 0; axis < 3; ++axis) {
+				expanding = expanding || bounds->min[axis] < impl_->previous_bounds->min[axis] ||
+					bounds->max[axis] > impl_->previous_bounds->max[axis];
+				contracting = contracting || bounds->min[axis] > impl_->previous_bounds->min[axis] ||
+					bounds->max[axis] < impl_->previous_bounds->max[axis];
+			}
+		}
+		if (impl_->force_fit || !bounds || !impl_->previous_bounds || contracting) {
+			impl_->target = fit.target;
+			impl_->vertical_size = fit.vertical_size;
+			impl_->smoothing_fit = false;
+		} else {
+			if (expanding) impl_->smoothing_fit = true;
+			if (impl_->smoothing_fit) {
+				impl_->target = smoothed_target(impl_->target, fit.target, 0.12);
+				impl_->vertical_size += 0.12 * (fit.vertical_size - impl_->vertical_size);
+				if (std::abs(impl_->vertical_size - fit.vertical_size) < 1e-6 &&
+					vector_norm(Vector3d{impl_->target[0] - fit.target[0],
+						impl_->target[1] - fit.target[1],
+						impl_->target[2] - fit.target[2]}) < 1e-6) {
+					impl_->target = fit.target;
+					impl_->vertical_size = fit.vertical_size;
+					impl_->smoothing_fit = false;
+				}
+			}
+		}
+	} else if (mode_ == ViewMode::Follow) {
+		impl_->smoothing_fit = false;
+		if (impl_->entering_follow) {
+			impl_->vertical_size = std::max(20.0, fit.vertical_size * 0.05);
+			impl_->entering_follow = false;
+		}
+	} else {
+		impl_->smoothing_fit = false;
+	}
+	if (mode_ == ViewMode::Follow && snapshot.has_packet) {
 		impl_->target = smoothed_target(impl_->target, snapshot.latest.estimate_position, 0.12);
 	}
+	impl_->previous_bounds = bounds;
+	impl_->force_fit = false;
 	const Vector3 target = to_view(impl_->target);
-	const float horizontal = impl_->distance * std::cos(impl_->pitch);
+	const Vector3d extent{std::max(std::abs(fitted_bounds.min[0] - impl_->target[0]),
+			std::abs(fitted_bounds.max[0] - impl_->target[0])),
+		std::max(std::abs(fitted_bounds.min[1] - impl_->target[1]),
+			std::abs(fitted_bounds.max[1] - impl_->target[1])),
+		std::max(std::abs(fitted_bounds.min[2] - impl_->target[2]),
+			std::abs(fitted_bounds.max[2] - impl_->target[2]))};
+	const double radius = std::hypot(extent[0], extent[1], extent[2]);
+	const double distance = std::max({10.0, fit.camera_distance,
+		2.0 * radius + impl_->vertical_size});
+	const double far_clip = distance + radius + impl_->vertical_size;
+	const float horizontal = static_cast<float>(distance * std::cos(impl_->pitch));
 	impl_->camera.target = target;
 	impl_->camera.position = Vector3{
 		target.x + horizontal * std::cos(impl_->yaw),
-		target.y + impl_->distance * std::sin(impl_->pitch),
+		target.y + static_cast<float>(distance * std::sin(impl_->pitch)),
 		target.z + horizontal * std::sin(impl_->yaw)};
+	impl_->camera.fovy = static_cast<float>(impl_->vertical_size);
 
 	BeginDrawing();
 	ClearBackground(Color{12, 16, 24, 255});
+	rlSetClipPlanes(0.1, far_clip);
 	BeginMode3D(impl_->camera);
 	DrawGrid(40, 1.0f);
 	DrawLine3D(Vector3{0, 0, 0}, Vector3{5, 0, 0}, RED);
@@ -152,9 +257,10 @@ void Renderer::draw(const ViewerModel& model) {
 			static_cast<unsigned long long>(snapshot.latest.accepted_gps_count),
 			paused_ ? "PAUSED" : "LIVE"), 24, 220, 18, RAYWHITE);
 	}
-	DrawText(TextFormat("WASD move  Q/E height  Shift fast  F follow [%s]",
-		follow_ ? "ON" : "OFF"), 24, 246, 16, RAYWHITE);
-	DrawText("Drag orbit  Wheel zoom  Space pause  R clear", 24, 270, 16, RAYWHITE);
+	DrawText(TextFormat("WASD move  Q/E height  Shift fast  view [%s]",
+		mode_ == ViewMode::Overview ? "OVERVIEW" :
+		mode_ == ViewMode::Follow ? "FOLLOW" : "MANUAL"), 24, 246, 16, RAYWHITE);
+	DrawText("H whole view  F follow  1/2/3 views  Left orbit  Right pan  Wheel zoom", 24, 270, 16, RAYWHITE);
 	DrawFPS(GetScreenWidth() - 100, 20);
 	EndDrawing();
 }
