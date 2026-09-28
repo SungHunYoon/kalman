@@ -15,6 +15,9 @@ namespace {
 
 void TrajectoryBuffer::push(const TelemetryPacket& packet) {
 	if (packet.sequence % 10 == 0) {
+		if (estimate_size_ == ESTIMATE_CAPACITY) {
+			estimate_history_truncated_ = true;
+		}
 		estimates_[estimate_head_] = packet.estimate_position;
 		estimate_head_ = (estimate_head_ + 1) % ESTIMATE_CAPACITY;
 		estimate_size_ = std::min(estimate_size_ + 1, ESTIMATE_CAPACITY);
@@ -31,6 +34,7 @@ void TrajectoryBuffer::clear() {
 	estimate_size_ = 0;
 	gps_head_ = 0;
 	gps_size_ = 0;
+	estimate_history_truncated_ = false;
 }
 
 std::size_t TrajectoryBuffer::estimate_count() const { return estimate_size_; }
@@ -42,4 +46,23 @@ const Vector3d& TrajectoryBuffer::estimate_at(std::size_t index) const {
 
 const Vector3d& TrajectoryBuffer::gps_at(std::size_t index) const {
 	return gps_[chronological_index(gps_head_, gps_size_, GPS_CAPACITY, index)];
+}
+
+std::optional<Bounds3d> TrajectoryBuffer::estimate_bounds() const {
+	if (estimate_size_ == 0) {
+		return std::nullopt;
+	}
+	Bounds3d bounds{estimate_at(0), estimate_at(0)};
+	for (std::size_t index = 1; index < estimate_size_; ++index) {
+		const Vector3d& point = estimate_at(index);
+		for (std::size_t axis = 0; axis < point.size(); ++axis) {
+			bounds.min[axis] = std::min(bounds.min[axis], point[axis]);
+			bounds.max[axis] = std::max(bounds.max[axis], point[axis]);
+		}
+	}
+	return bounds;
+}
+
+bool TrajectoryBuffer::estimate_history_truncated() const noexcept {
+	return estimate_history_truncated_;
 }

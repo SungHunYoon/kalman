@@ -8,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 
 namespace {
@@ -70,6 +71,25 @@ void run_visualizer_model_tests() {
 		model.trajectory().estimate_count() != 1 ||
 		model.trajectory().estimate_at(0) != Vector3d{99, 0, 0}) {
 		throw std::runtime_error("viewer did not reset for a restarted client");
+	}
+	auto long_session = std::make_unique<ViewerModel>();
+	for (std::uint64_t i = 0; i <= TrajectoryBuffer::ESTIMATE_CAPACITY; ++i) {
+		TelemetryPacket sample;
+		sample.sequence = i * 10;
+		sample.estimate_position = {static_cast<double>(i), 0.0, 0.0};
+		long_session->accept(sample, now);
+	}
+	if (!long_session->trajectory().estimate_history_truncated()) {
+		throw std::runtime_error("long session truncation not reported");
+	}
+	TelemetryPacket new_session;
+	new_session.sequence = 0;
+	new_session.estimate_position = {99.0, 0.0, 0.0};
+	long_session->accept(new_session, now);
+	if (long_session->trajectory().estimate_history_truncated() ||
+		!long_session->trajectory().estimate_bounds() ||
+		long_session->trajectory().estimate_bounds()->min != Vector3d{99.0, 0.0, 0.0}) {
+		throw std::runtime_error("restart retained old route state");
 	}
 
 	ViewerModel wrapped;
