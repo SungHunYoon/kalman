@@ -19,6 +19,7 @@ void run_telemetry_integration_tests();
 void run_trajectory_buffer_tests();
 void run_visualizer_model_tests();
 void run_render_math_tests();
+void run_view_geometry_tests();
 
 namespace {
 	void require(bool condition, const std::string& message) {
@@ -336,6 +337,7 @@ int main() {
 		run_trajectory_buffer_tests();
 		run_visualizer_model_tests();
 		run_render_math_tests();
+		run_view_geometry_tests();
 		test_assembles_split_markers();
 		test_extracts_multiple_messages_from_one_chunk();
 		test_assembles_line_per_datagram_protocol();

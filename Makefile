@@ -19,6 +19,7 @@ VISUALIZER_NAME = kalman_visualizer
 VISUALIZER_SRCS = $(shell find visualizer -name "*.cpp") \
 	src/visualizer/telemetry_receiver.cpp src/visualizer/view_model.cpp \
 	src/visualizer/trajectory_buffer.cpp src/visualizer/render_math.cpp \
+	src/visualizer/view_geometry.cpp \
 	src/telemetry/telemetry_packet.cpp src/performance/filter_stats.cpp
 RAYLIB_FLAGS = $(shell pkg-config --cflags --libs raylib 2>/dev/null)
 
