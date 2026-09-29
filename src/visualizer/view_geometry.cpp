@@ -81,6 +81,20 @@ double zoom_vertical_size(double current_size, double wheel_steps) noexcept {
 	return std::clamp(size * std::pow(0.85, exponent), MIN_SIZE, MAX_SIZE);
 }
 
+Vector3d cursor_zoom_target(const Vector3d& target, double yaw, double pitch,
+	double cursor_x, double cursor_y, int viewport_width, int viewport_height,
+	double old_size, double new_size) noexcept {
+	const double dx = cursor_x - 0.5 * viewport_width;
+	const double dy = cursor_y - 0.5 * viewport_height;
+	const Vector3d shift = screen_pan_delta(yaw, pitch, -dx, -dy,
+		old_size - new_size, viewport_height);
+	Vector3d result = target;
+	for (std::size_t axis = 0; axis < result.size(); ++axis) {
+		result[axis] += shift[axis];
+	}
+	return result;
+}
+
 Vector3d screen_pan_delta(double yaw, double pitch, double dx_pixels,
 	double dy_pixels, double vertical_size, int viewport_height) noexcept {
 	const double scale = vertical_size / std::max(1, viewport_height);

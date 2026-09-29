@@ -164,6 +164,37 @@ void run_view_geometry_tests() {
 	}
 	const double zoom_in = zoom_vertical_size(1000.0, 1.0);
 	const double zoom_out = zoom_vertical_size(1000.0, -1.0);
+	const Vector3d zoom_target{120.0, -35.0, 18.0};
+	for (const double pitch : {0.0, 0.55, -0.8}) {
+		const double yaw = 0.7;
+		const Vector3d right{std::sin(yaw), -std::cos(yaw), 0.0};
+		const Vector3d up = camera_up_direction(yaw, pitch);
+		for (const double new_size : {zoom_in, zoom_out}) {
+			const double cursor_x = 930.0;
+			const double cursor_y = 170.0;
+			Vector3d anchor = zoom_target;
+			for (std::size_t axis = 0; axis < 3; ++axis) {
+				anchor[axis] += (right[axis] * (cursor_x - 600.0) +
+					up[axis] * (400.0 - cursor_y)) * 1000.0 / 800.0;
+			}
+			const Vector3d shifted = cursor_zoom_target(zoom_target, yaw, pitch,
+				cursor_x, cursor_y, 1200, 800, 1000.0, new_size);
+			double projected_x = 600.0;
+			double projected_y = 400.0;
+			for (std::size_t axis = 0; axis < 3; ++axis) {
+				projected_x += (anchor[axis] - shifted[axis]) * right[axis] *
+					800.0 / new_size;
+				projected_y -= (anchor[axis] - shifted[axis]) * up[axis] *
+					800.0 / new_size;
+			}
+			require_close(projected_x, cursor_x, "zoom moved cursor anchor horizontally");
+			require_close(projected_y, cursor_y, "zoom moved cursor anchor vertically");
+		}
+	}
+	if (cursor_zoom_target(zoom_target, 0.7, 0.55, 600.0, 400.0,
+		1200, 800, 1000.0, zoom_in) != zoom_target) {
+		throw std::runtime_error("centered zoom moved camera target");
+	}
 	const Vector3d pan = screen_pan_delta(0.0, 0.0, 100.0, 0.0, 1000.0, 1000);
 	if (!(zoom_in < 1000.0) || !(zoom_out > 1000.0) ||
 		!std::isfinite(zoom_in) || !std::isfinite(zoom_out) ||

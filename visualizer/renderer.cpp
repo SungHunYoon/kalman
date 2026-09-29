@@ -57,10 +57,11 @@ void Renderer::update_controls(ViewerModel& model) {
 	const bool panning = IsMouseButtonDown(MOUSE_BUTTON_RIGHT) &&
 		(mouse_delta.x != 0.0f || mouse_delta.y != 0.0f);
 	const double wheel_steps = GetMouseWheelMove();
+	const bool zooming = wheel_steps != 0.0 && GetMouseY() >= SCENE_TOP;
 	const bool whole_view_pressed = IsKeyPressed(KEY_H);
 	const ViewMode old_mode = mode_;
 	mode_ = next_view_mode(mode_, whole_view_pressed, IsKeyPressed(KEY_F),
-		moving || panning || wheel_steps != 0.0);
+		moving || panning || zooming);
 	if (whole_view_pressed) impl_->force_fit = true;
 	if (mode_ == ViewMode::Follow && old_mode != ViewMode::Follow) {
 		impl_->entering_follow = true;
@@ -103,8 +104,12 @@ void Renderer::update_controls(ViewerModel& model) {
 				impl_->target[axis] += delta[axis];
 			}
 		}
-		if (wheel_steps != 0.0) {
-			impl_->vertical_size = zoom_vertical_size(impl_->vertical_size, wheel_steps);
+		if (zooming) {
+			const double new_size = zoom_vertical_size(impl_->vertical_size, wheel_steps);
+			impl_->target = cursor_zoom_target(impl_->target, impl_->yaw, impl_->pitch,
+				GetMouseX(), GetMouseY() - SCENE_TOP, GetScreenWidth(), scene_height(),
+				impl_->vertical_size, new_size);
+			impl_->vertical_size = new_size;
 		}
 	}
 	if (IsKeyPressed(KEY_SPACE)) {

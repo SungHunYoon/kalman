@@ -34,6 +34,9 @@ enum class ViewMode { Overview, Manual, Follow };
 ViewMode next_view_mode(ViewMode current, bool whole_view_pressed,
 	bool follow_pressed, bool manual_input) noexcept;
 double zoom_vertical_size(double current_size, double wheel_steps) noexcept;
+Vector3d cursor_zoom_target(const Vector3d& target, double yaw, double pitch,
+	double cursor_x, double cursor_y, int viewport_width, int viewport_height,
+	double old_size, double new_size) noexcept;
 Vector3d screen_pan_delta(double yaw, double pitch, double dx_pixels,
 	double dy_pixels, double vertical_size, int viewport_height) noexcept;
 double camera_move_speed(double vertical_size) noexcept;
