@@ -54,6 +54,12 @@ void require_fitted(const Bounds3d& bounds, double yaw, double pitch,
 	require_finite_positive(fit);
 	require_corners_visible(bounds, yaw, pitch, width, height, fit);
 }
+
+void require_close(double actual, double expected, const char* message) {
+	if (!std::isfinite(actual) || std::abs(actual - expected) > TOLERANCE) {
+		throw std::runtime_error(message);
+	}
+}
 }
 
 void run_view_geometry_tests() {
@@ -107,6 +113,54 @@ void run_view_geometry_tests() {
 		next_view_mode(ViewMode::Overview, false, true, false) != ViewMode::Follow ||
 		next_view_mode(ViewMode::Follow, false, true, false) != ViewMode::Manual) {
 		throw std::runtime_error("camera mode transition mismatch");
+	}
+	const ViewOrientation top_orientation = preset_view_orientation(1);
+	const Vector3d top_up = camera_up_direction(top_orientation.yaw, top_orientation.pitch);
+	const Vector3d top_forward{std::cos(top_orientation.pitch) * std::cos(top_orientation.yaw),
+		std::cos(top_orientation.pitch) * std::sin(top_orientation.yaw),
+		std::sin(top_orientation.pitch)};
+	require_close(top_orientation.pitch, std::acos(-1.0) / 2.0,
+		"top preset does not look down the telemetry Z axis");
+	require_close(top_up[0] * top_forward[0] + top_up[1] * top_forward[1] +
+		top_up[2] * top_forward[2], 0.0,
+		"top preset camera up is parallel to its viewing direction");
+	const Bounds3d top_route_a{{-8.0, -4.0, -2.0}, {8.0, 4.0, 2.0}};
+	const Bounds3d top_route_b{{-8.0, -4.0, -2000.0}, {8.0, 4.0, 2000.0}};
+	require_close(fit_estimate_bounds(top_route_a, top_orientation.yaw,
+		top_orientation.pitch, 1200, 800).vertical_size,
+		fit_estimate_bounds(top_route_b, top_orientation.yaw,
+			top_orientation.pitch, 1200, 800).vertical_size,
+		"top view scale changed when only vertical extent changed");
+	if (!overview_refit_for_viewport_change(ViewMode::Overview, true) ||
+		overview_refit_for_viewport_change(ViewMode::Overview, false) ||
+		overview_refit_for_viewport_change(ViewMode::Manual, true) ||
+		overview_refit_for_viewport_change(ViewMode::Follow, true)) {
+		throw std::runtime_error("viewport change camera mode behavior mismatch");
+	}
+	const Bounds3d expanded{{0.0, 0.0, 0.0}, {10000.0, 10000.0, 1000.0}};
+	const CameraFit expansion_fit = fit_estimate_bounds(expanded, 0.7, 0.4, 1200, 800);
+	Vector3d eased_target{};
+	double eased_size = 1.0;
+	for (std::size_t axis = 0; axis < eased_target.size(); ++axis) {
+		eased_target[axis] += 0.12 * (expansion_fit.target[axis] - eased_target[axis]);
+	}
+	eased_size += 0.12 * (expansion_fit.vertical_size - eased_size);
+	const double containing_size = overview_size_containing_bounds(expanded, eased_target,
+		0.7, 0.4, 1200, 800, eased_size);
+	if (!(containing_size > eased_size)) {
+		throw std::runtime_error("overview expansion did not preserve trajectory containment");
+	}
+	require_corners_visible(expanded, 0.7, 0.4, 1200, 800,
+		CameraFit{eased_target, containing_size, expansion_fit.camera_distance,
+			expansion_fit.far_clip});
+	const ScreenRect preferred_label{100.0, 100.0, 64.0, 24.0};
+	const std::vector<ScreenRect> occupied_labels{preferred_label};
+	const auto placed_label = place_screen_label(preferred_label, 400, 300, occupied_labels);
+	if (!placed_label || screen_rects_overlap(*placed_label, preferred_label) ||
+		placed_label->x < 0.0 || placed_label->y < 0.0 ||
+		placed_label->x + placed_label->width > 400.0 ||
+		placed_label->y + placed_label->height > 300.0) {
+		throw std::runtime_error("colliding label did not receive a visible alternate position");
 	}
 	const double zoom_in = zoom_vertical_size(1000.0, 1.0);
 	const double zoom_out = zoom_vertical_size(1000.0, -1.0);

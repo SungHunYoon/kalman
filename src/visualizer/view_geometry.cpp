@@ -1,6 +1,7 @@
 #include "visualizer/view_geometry.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iomanip>
 #include <locale>
@@ -96,6 +97,85 @@ double camera_move_speed(double vertical_size) noexcept {
 	return std::max(1.0, vertical_size * 0.5);
 }
 
+ViewOrientation preset_view_orientation(int preset) noexcept {
+	constexpr double HALF_PI = 1.57079632679489661923;
+	if (preset == 1) return {0.0, HALF_PI};
+	if (preset == 2) return {HALF_PI, 0.0};
+	return {0.0, 0.0};
+}
+
+Vector3d camera_up_direction(double yaw, double pitch) noexcept {
+	return {-std::sin(pitch) * std::cos(yaw),
+		-std::sin(pitch) * std::sin(yaw), std::cos(pitch)};
+}
+
+bool overview_refit_for_viewport_change(ViewMode mode, bool dimensions_changed) noexcept {
+	return dimensions_changed && mode == ViewMode::Overview;
+}
+
+double overview_size_containing_bounds(const Bounds3d& bounds, const Vector3d& target,
+	double yaw, double pitch, int viewport_width, int viewport_height,
+	double requested_size) noexcept {
+	const double sin_yaw = std::sin(yaw);
+	const double cos_yaw = std::cos(yaw);
+	const Vector3d right{sin_yaw, -cos_yaw, 0.0};
+	const Vector3d up = camera_up_direction(yaw, pitch);
+	double horizontal_extent = 0.0;
+	double vertical_extent = 0.0;
+	for (int x = 0; x < 2; ++x) {
+		for (int y = 0; y < 2; ++y) {
+			for (int z = 0; z < 2; ++z) {
+				const Vector3d offset{
+					(x ? bounds.max[0] : bounds.min[0]) - target[0],
+					(y ? bounds.max[1] : bounds.min[1]) - target[1],
+					(z ? bounds.max[2] : bounds.min[2]) - target[2]};
+				const double horizontal = offset[0] * right[0] +
+					offset[1] * right[1] + offset[2] * right[2];
+				const double vertical = offset[0] * up[0] +
+					offset[1] * up[1] + offset[2] * up[2];
+				horizontal_extent = std::max(horizontal_extent, std::abs(horizontal));
+				vertical_extent = std::max(vertical_extent, std::abs(vertical));
+			}
+		}
+	}
+	const double aspect = static_cast<double>(std::max(1, viewport_width)) /
+		std::max(1, viewport_height);
+	const double required = std::max({1.0, 2.5 * vertical_extent,
+		2.5 * horizontal_extent / aspect});
+	return std::max(requested_size, required);
+}
+
+bool screen_rects_overlap(const ScreenRect& first, const ScreenRect& second) noexcept {
+	return first.x < second.x + second.width && first.x + first.width > second.x &&
+		first.y < second.y + second.height && first.y + first.height > second.y;
+}
+
+std::optional<ScreenRect> place_screen_label(const ScreenRect& preferred,
+	int viewport_width, int viewport_height,
+	const std::vector<ScreenRect>& occupied) noexcept {
+	constexpr double SPACING = 3.0;
+	const std::array<std::pair<double, double>, 8> directions{{
+		{0.0, -1.0}, {1.0, 0.0}, {0.0, 1.0}, {-1.0, 0.0},
+		{1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}, {-1.0, -1.0}}};
+	const double max_x = std::max(0, viewport_width) - preferred.width;
+	const double max_y = std::max(0, viewport_height) - preferred.height;
+	for (int ring = 0; ring <= 16; ++ring) {
+		const double distance = ring * (std::max(preferred.width, preferred.height) + SPACING);
+		for (const auto& direction : directions) {
+			const ScreenRect candidate{preferred.x + direction.first * distance,
+				preferred.y + direction.second * distance, preferred.width, preferred.height};
+			if (candidate.x < 0.0 || candidate.y < 0.0 ||
+				candidate.x > max_x || candidate.y > max_y) continue;
+			bool overlaps = false;
+			for (const ScreenRect& previous : occupied) {
+				overlaps = overlaps || screen_rects_overlap(candidate, previous);
+			}
+			if (!overlaps) return candidate;
+		}
+	}
+	return std::nullopt;
+}
+
 CameraFit fit_estimate_bounds(const Bounds3d& bounds, double yaw, double pitch,
 	int viewport_width, int viewport_height) noexcept {
 	Vector3d target{};
@@ -108,7 +188,7 @@ CameraFit fit_estimate_bounds(const Bounds3d& bounds, double yaw, double pitch,
 	const double sin_pitch = std::sin(pitch);
 	const double cos_pitch = std::cos(pitch);
 	const Vector3d right{sin_yaw, -cos_yaw, 0.0};
-	const Vector3d up{-sin_pitch * cos_yaw, -sin_pitch * sin_yaw, cos_pitch};
+	const Vector3d up = camera_up_direction(yaw, pitch);
 	const Vector3d outward{cos_pitch * cos_yaw, cos_pitch * sin_yaw, sin_pitch};
 	double horizontal_extent = 0.0;
 	double vertical_extent = 0.0;

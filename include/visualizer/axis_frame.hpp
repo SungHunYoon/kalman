@@ -10,6 +10,8 @@ inline Vector3 to_view(const Vector3d& point) {
 }
 
 void draw_axis_frame_3d(const Bounds3d& bounds);
-void draw_axis_labels_2d(const Bounds3d& bounds, const Camera3D& camera);
-void draw_world_label(const char* text, const Vector3d& point, const Camera3D& camera,
-	int font_size, Color color, int offset_y = 6);
+void draw_axis_labels_2d(const Bounds3d& bounds, const Camera3D& camera,
+	std::vector<ScreenRect>& occupied);
+bool draw_world_label(const char* text, const Vector3d& point, const Camera3D& camera,
+	int font_size, Color color, std::vector<ScreenRect>* occupied = nullptr,
+	int offset_y = 6);

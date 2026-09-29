@@ -26,10 +26,13 @@ struct Renderer::Impl {
 	bool smoothing_fit = false;
 	bool entering_follow = false;
 	bool show_details = false;
+	int viewport_width = 0;
+	int viewport_height = 0;
 };
 
 Renderer::Renderer(int width, int height) : impl_(new Impl) {
 	InitWindow(width, height, "Kalman 3D Visualizer");
+	SetWindowState(FLAG_WINDOW_RESIZABLE);
 	SetTargetFPS(60);
 	impl_->camera.up = Vector3{0, 1, 0};
 	impl_->camera.fovy = static_cast<float>(impl_->vertical_size);
@@ -68,16 +71,19 @@ void Renderer::update_controls(ViewerModel& model) {
 		impl_->force_fit = true;
 	}
 	if (IsKeyPressed(KEY_ONE)) {
-		impl_->yaw = 0.0f;
-		impl_->pitch = 1.45f;
+		const ViewOrientation orientation = preset_view_orientation(1);
+		impl_->yaw = static_cast<float>(orientation.yaw);
+		impl_->pitch = static_cast<float>(orientation.pitch);
 		impl_->force_fit = true;
 	} else if (IsKeyPressed(KEY_TWO)) {
-		impl_->yaw = 1.5707963f;
-		impl_->pitch = 0.0f;
+		const ViewOrientation orientation = preset_view_orientation(2);
+		impl_->yaw = static_cast<float>(orientation.yaw);
+		impl_->pitch = static_cast<float>(orientation.pitch);
 		impl_->force_fit = true;
 	} else if (IsKeyPressed(KEY_THREE)) {
-		impl_->yaw = 0.0f;
-		impl_->pitch = 0.0f;
+		const ViewOrientation orientation = preset_view_orientation(3);
+		impl_->yaw = static_cast<float>(orientation.yaw);
+		impl_->pitch = static_cast<float>(orientation.pitch);
 		impl_->force_fit = true;
 	}
 	if (!whole_view_pressed) {
@@ -117,11 +123,20 @@ void Renderer::update_controls(ViewerModel& model) {
 
 void Renderer::draw(const ViewerModel& model) {
 	const ViewerSnapshot snapshot = model.snapshot(std::chrono::steady_clock::now());
+	const int viewport_width = GetScreenWidth();
+	const int viewport_height = scene_height();
+	const bool viewport_changed = viewport_width != impl_->viewport_width ||
+		viewport_height != impl_->viewport_height;
+	if (overview_refit_for_viewport_change(mode_, viewport_changed)) {
+		impl_->force_fit = true;
+	}
+	impl_->viewport_width = viewport_width;
+	impl_->viewport_height = viewport_height;
 	const auto bounds = model.trajectory().estimate_bounds();
 	const Bounds3d reference_bounds{{-1.0, -1.0, -1.0}, {1.0, 1.0, 1.0}};
 	const Bounds3d fitted_bounds = bounds ? padded_axis_bounds(*bounds) : reference_bounds;
 	const CameraFit fit = fit_estimate_bounds(fitted_bounds, impl_->yaw, impl_->pitch,
-		GetScreenWidth(), scene_height());
+		viewport_width, viewport_height);
 	if (mode_ == ViewMode::Overview) {
 		bool expanding = false;
 		bool contracting = false;
@@ -152,6 +167,9 @@ void Renderer::draw(const ViewerModel& model) {
 				}
 			}
 		}
+		impl_->vertical_size = overview_size_containing_bounds(fitted_bounds,
+			impl_->target, impl_->yaw, impl_->pitch, viewport_width, viewport_height,
+			impl_->vertical_size);
 	} else if (mode_ == ViewMode::Follow) {
 		impl_->smoothing_fit = false;
 		if (impl_->entering_follow) {
@@ -186,6 +204,8 @@ void Renderer::draw(const ViewerModel& model) {
 	const double far_clip = distance + radius + impl_->vertical_size;
 	const float horizontal = static_cast<float>(distance * std::cos(impl_->pitch));
 	impl_->camera.target = target;
+	const Vector3d camera_up = camera_up_direction(impl_->yaw, impl_->pitch);
+	impl_->camera.up = to_view(camera_up);
 	impl_->camera.position = Vector3{
 		target.x + horizontal * std::cos(impl_->yaw),
 		target.y + static_cast<float>(distance * std::sin(impl_->pitch)),
@@ -232,11 +252,13 @@ void Renderer::draw(const ViewerModel& model) {
 		}
 	}
 	EndMode3D();
-	draw_axis_labels_2d(fitted_bounds, impl_->camera);
+	std::vector<ScreenRect> occupied_labels;
+	draw_axis_labels_2d(fitted_bounds, impl_->camera, occupied_labels);
 	if (count != 0) {
 		draw_world_label(trajectory.estimate_history_truncated() ? "Oldest retained" : "Start",
-			trajectory.estimate_at(0), impl_->camera, 18, GREEN, -24);
-		draw_world_label("End", trajectory.estimate_at(count - 1), impl_->camera, 18, ORANGE);
+			trajectory.estimate_at(0), impl_->camera, 18, GREEN, &occupied_labels, -24);
+		draw_world_label("End", trajectory.estimate_at(count - 1), impl_->camera,
+			18, ORANGE, &occupied_labels);
 	} else {
 		const char* waiting = "Waiting for estimated trajectory";
 		DrawText(waiting, (GetScreenWidth() - MeasureText(waiting, 22)) / 2,
