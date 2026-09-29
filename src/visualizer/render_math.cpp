@@ -29,8 +29,3 @@ Vector3d camera_move_delta(double yaw, double forward, double right, double up,
 		distance * (-forward * std::sin(yaw) - right * std::cos(yaw)),
 		distance * up};
 }
-
-bool camera_follow_enabled(bool currently_enabled, bool toggle_requested,
-	bool manual_movement) noexcept {
-	return !manual_movement && (toggle_requested ? !currently_enabled : currently_enabled);
-}

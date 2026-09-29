@@ -10,7 +10,5 @@ struct FilterSnapshot {
 };
 
 struct GpsUpdateResult {
-	bool accepted = false;
 	Vector3d innovation{};
-	double mahalanobis_squared = 0.0;
 };

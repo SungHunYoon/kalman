@@ -17,7 +17,6 @@ void run_telemetry_integration_tests() {
 	snapshot.position_variance = {0.1, 0.2, 0.3};
 	snapshot.gps_variance = {1, 2, 3};
 	GpsUpdateResult gps;
-	gps.accepted = true;
 	gps.innovation = {-3, -3, -3};
 	const TelemetryPacket first = builder.build(update, snapshot, gps, {}, 2, 1);
 	const TelemetryPacket second = builder.build(update, snapshot, gps, {}, 3, 1);

@@ -40,10 +40,4 @@ void run_render_math_tests() {
 	if (std::abs(vector_norm(diagonal) - 2.0) > 1e-9) {
 		throw std::runtime_error("diagonal camera movement exceeds base speed");
 	}
-	if (camera_follow_enabled(true, false, true) ||
-		!camera_follow_enabled(false, true, false) ||
-		camera_follow_enabled(true, true, false) ||
-		camera_follow_enabled(false, false, false)) {
-		throw std::runtime_error("manual camera movement and follow toggle mismatch");
-	}
 }

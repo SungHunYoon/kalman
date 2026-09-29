@@ -84,7 +84,6 @@ bool SensorState::apply(const SensorUpdate& update) {
 			last_gps_result_.innovation[axis] = (*update.gps)[axis] - predicted_position[axis];
 		}
 		filter->update_gps(*update.gps);
-		last_gps_result_.accepted = true;
 		++applied_gps_count_;
 	}
 	const auto finished = std::chrono::steady_clock::now();
