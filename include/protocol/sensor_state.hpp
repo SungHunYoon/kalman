@@ -35,5 +35,5 @@ class SensorState {
 		GpsUpdateResult last_gps_result() const;
 		std::uint64_t accepted_gps_count() const;
 		std::uint64_t rejected_gps_count() const;
-		FilterTimingSnapshot timing_snapshot() const;
+		FilterTimingSnapshot timing_snapshot(bool include_percentiles = true) const;
 };

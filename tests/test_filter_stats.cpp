@@ -21,4 +21,10 @@ void run_filter_stats_tests() {
 		result.p99 < 4900.0 || result.p99 > 5000.0) {
 		throw std::runtime_error("timing percentile mismatch");
 	}
+	const FilterTimingSnapshot aggregate = stats.snapshot(false);
+	if (aggregate.count != result.count || aggregate.current != result.current ||
+		aggregate.average != result.average || aggregate.minimum != result.minimum ||
+		aggregate.maximum != result.maximum || aggregate.p95 != 0.0 || aggregate.p99 != 0.0) {
+		throw std::runtime_error("timing snapshot without percentiles mismatch");
+	}
 }

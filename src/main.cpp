@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
 					},
 					[&telemetry_publisher](const TelemetryPacket& packet) {
 						(void)telemetry_publisher->publish(packet);
-					});
+					}, options.telemetry_enabled);
 			}
 		}
 		const FilterTimingSnapshot timing = sensor_state.timing_snapshot();

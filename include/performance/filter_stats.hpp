@@ -18,7 +18,7 @@ class FilterStats {
 public:
 	explicit FilterStats(std::uint64_t warmup_samples = 1000);
 	void record(double microseconds);
-	FilterTimingSnapshot snapshot() const;
+	FilterTimingSnapshot snapshot(bool include_percentiles = true) const;
 
 private:
 	static constexpr std::size_t CAPACITY = 4096;

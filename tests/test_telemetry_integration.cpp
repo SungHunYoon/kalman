@@ -40,6 +40,14 @@ void run_telemetry_integration_tests() {
 	if (events != std::vector<std::string>{"response", "telemetry"}) {
 		throw std::runtime_error("response was not sent before telemetry");
 	}
+	SensorState disabled_state;
+	events.clear();
+	process_message(disabled_state, initial, builder,
+		[&events](const Vector<double>&) { events.push_back("response"); },
+		[&events](const TelemetryPacket&) { events.push_back("telemetry"); }, false);
+	if (events != std::vector<std::string>{"response"}) {
+		throw std::runtime_error("disabled telemetry affected response or published a packet");
+	}
 
 	std::vector<TelemetryPacket> packets;
 	SensorUpdate no_gps;

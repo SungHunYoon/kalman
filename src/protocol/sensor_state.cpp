@@ -129,6 +129,6 @@ std::uint64_t SensorState::rejected_gps_count() const {
 	return 0;
 }
 
-FilterTimingSnapshot SensorState::timing_snapshot() const {
-	return timing_stats_.snapshot();
+FilterTimingSnapshot SensorState::timing_snapshot(bool include_percentiles) const {
+	return timing_stats_.snapshot(include_percentiles);
 }

@@ -1,7 +1,7 @@
 NAME		= kalman
 
 CXX			= c++
-CXXFLAGS	= -Wall -Wextra -Werror -std=c++17
+CXXFLAGS	= -Wall -Wextra -Werror -std=c++17 -O2
 INCLUDES	= -Iinclude
 
 SRC_DIR		= src

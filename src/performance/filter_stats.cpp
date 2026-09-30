@@ -28,7 +28,7 @@ void FilterStats::record(double microseconds) {
 	sum_ += microseconds;
 }
 
-FilterTimingSnapshot FilterStats::snapshot() const {
+FilterTimingSnapshot FilterStats::snapshot(bool include_percentiles) const {
 	FilterTimingSnapshot result;
 	result.count = count_;
 	if (count_ == 0) {
@@ -38,6 +38,9 @@ FilterTimingSnapshot FilterStats::snapshot() const {
 	result.average = sum_ / static_cast<double>(count_);
 	result.minimum = minimum_;
 	result.maximum = maximum_;
+	if (!include_percentiles) {
+		return result;
+	}
 
 	std::array<double, CAPACITY> ordered{};
 	const std::size_t used = static_cast<std::size_t>(std::min<std::uint64_t>(count_, CAPACITY));
